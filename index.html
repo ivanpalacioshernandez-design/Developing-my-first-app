@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TeamFlow — Project Management</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <rect width="12" height="12" rx="3" fill="#6366f1"/>
+          <rect x="16" width="12" height="12" rx="3" fill="#8b5cf6"/>
+          <rect y="16" width="12" height="12" rx="3" fill="#a78bfa"/>
+          <rect x="16" y="16" width="12" height="12" rx="3" fill="#c4b5fd"/>
+        </svg>
+        <span class="logo-text">TeamFlow</span>
+      </div>
+      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Projects</span>
+      <button class="btn-new-project" id="newProjectBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        New Project
+      </button>
+    </div>
+
+    <nav class="project-list" id="projectList"></nav>
+
+    <div class="sidebar-footer">
+      <div class="member-avatars" id="memberAvatars"></div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main" id="main">
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <div class="project-title-wrap">
+          <h1 class="project-title" id="projectTitle">Select a project</h1>
+          <span class="project-subtitle" id="projectSubtitle"></span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="search-wrap">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" class="search-input" id="searchInput" placeholder="Search tasks…" />
+        </div>
+        <button class="btn-primary" id="addTaskBtn" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Add Task
+        </button>
+      </div>
+    </header>
+
+    <!-- Board filters -->
+    <div class="board-filters" id="boardFilters" style="display:none">
+      <div class="filter-group">
+        <label class="filter-label">Priority</label>
+        <select class="filter-select" id="filterPriority">
+          <option value="">All</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Assignee</label>
+        <select class="filter-select" id="filterAssignee">
+          <option value="">All</option>
+        </select>
+      </div>
+      <div class="board-stats" id="boardStats"></div>
+    </div>
+
+    <!-- Kanban board -->
+    <div class="board" id="board">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">
+          <svg width="64" height="64" viewBox="0 0 28 28" fill="none">
+            <rect width="12" height="12" rx="3" fill="#6366f1" opacity="0.4"/>
+            <rect x="16" width="12" height="12" rx="3" fill="#8b5cf6" opacity="0.4"/>
+            <rect y="16" width="12" height="12" rx="3" fill="#a78bfa" opacity="0.4"/>
+            <rect x="16" y="16" width="12" height="12" rx="3" fill="#c4b5fd" opacity="0.4"/>
+          </svg>
+        </div>
+        <h2>Welcome to TeamFlow</h2>
+        <p>Create a project to get started tracking tasks with your team.</p>
+        <button class="btn-primary" id="emptyCreateBtn">Create your first project</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Overlay for mobile sidebar -->
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+  <!-- Project Modal -->
+  <div class="modal-backdrop" id="projectModal" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="projectModalTitle">New Project</h2>
+        <button class="modal-close" data-close="projectModal" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <form id="projectForm">
+        <div class="form-group">
+          <label class="form-label" for="projectName">Project Name <span class="required">*</span></label>
+          <input type="text" class="form-input" id="projectName" placeholder="e.g. Website Redesign" required maxlength="60" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="projectDescription">Description</label>
+          <textarea class="form-input form-textarea" id="projectDescription" placeholder="What is this project about?" rows="3" maxlength="200"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Color</label>
+          <div class="color-picker" id="colorPicker">
+            <button type="button" class="color-swatch selected" data-color="#6366f1" style="background:#6366f1" aria-label="Indigo"></button>
+            <button type="button" class="color-swatch" data-color="#8b5cf6" style="background:#8b5cf6" aria-label="Purple"></button>
+            <button type="button" class="color-swatch" data-color="#ec4899" style="background:#ec4899" aria-label="Pink"></button>
+            <button type="button" class="color-swatch" data-color="#f59e0b" style="background:#f59e0b" aria-label="Amber"></button>
+            <button type="button" class="color-swatch" data-color="#10b981" style="background:#10b981" aria-label="Emerald"></button>
+            <button type="button" class="color-swatch" data-color="#3b82f6" style="background:#3b82f6" aria-label="Blue"></button>
+            <button type="button" class="color-swatch" data-color="#ef4444" style="background:#ef4444" aria-label="Red"></button>
+            <button type="button" class="color-swatch" data-color="#14b8a6" style="background:#14b8a6" aria-label="Teal"></button>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" data-close="projectModal">Cancel</button>
+          <button type="submit" class="btn-primary" id="projectSubmitBtn">Create Project</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Task Modal -->
+  <div class="modal-backdrop" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title" id="taskModalTitle">New Task</h2>
+        <button class="modal-close" data-close="taskModal" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <form id="taskForm">
+        <input type="hidden" id="taskId" />
+        <input type="hidden" id="taskStatus" value="todo" />
+        <div class="form-group">
+          <label class="form-label" for="taskTitle">Title <span class="required">*</span></label>
+          <input type="text" class="form-input" id="taskTitle" placeholder="What needs to be done?" required maxlength="120" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="taskDescription">Description</label>
+          <textarea class="form-input form-textarea" id="taskDescription" placeholder="Add more details…" rows="4" maxlength="1000"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="taskAssignee">Assignee</label>
+            <input type="text" class="form-input" id="taskAssignee" placeholder="Team member name" maxlength="50" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="taskDueDate">Due Date</label>
+            <input type="date" class="form-input" id="taskDueDate" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="taskPriority">Priority</label>
+            <select class="form-input form-select" id="taskPriority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="taskStatusSelect">Status</label>
+            <select class="form-input form-select" id="taskStatusSelect">
+              <option value="todo">To Do</option>
+              <option value="inprogress">In Progress</option>
+              <option value="done">Done</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-danger btn-delete-task" id="deleteTaskBtn" style="display:none">Delete Task</button>
+          <div class="modal-actions-right">
+            <button type="button" class="btn-secondary" data-close="taskModal">Cancel</button>
+            <button type="submit" class="btn-primary" id="taskSubmitBtn">Add Task</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Delete Project Confirm Modal -->
+  <div class="modal-backdrop" id="confirmModal" role="dialog" aria-modal="true">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h2 class="modal-title">Delete Project?</h2>
+      </div>
+      <p class="confirm-text" id="confirmText">This will permanently delete the project and all its tasks. This cannot be undone.</p>
+      <div class="modal-actions">
+        <button class="btn-secondary" data-close="confirmModal">Cancel</button>
+        <button class="btn-danger" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
