@@ -1,721 +1,709 @@
-/* ── State ─────────────────────────────────────────────────── */
-let state = {
-  projects: [],
-  activeProjectId: null,
+'use strict';
+
+// ── Constants ──────────────────────────────────────────────────
+const CAT_COLORS = {
+  'Viajes':          '#3b82f6',
+  'Restaurantes':    '#f59e0b',
+  'Supermercado':    '#10b981',
+  'Alimentacion':    '#22c55e',
+  'Alimentación':    '#22c55e',
+  'Entretenimiento': '#8b5cf6',
+  'Transporte':      '#06b6d4',
+  'Gasolina':        '#f97316',
+  'Ropa':            '#ec4899',
+  'Servicios':       '#6366f1',
+  'Pago de Tarjeta': '#64748b',
+  'Otro':            '#94a3b8',
 };
 
-/* ── Persistence ────────────────────────────────────────────── */
-function save() {
-  localStorage.setItem('teamflow_v1', JSON.stringify(state));
-}
+const PAGE_SIZE = 25;
 
-function load() {
-  try {
-    const raw = localStorage.getItem('teamflow_v1');
-    if (raw) state = JSON.parse(raw);
-  } catch (_) { /* fresh start */ }
-}
+// ── Settings ───────────────────────────────────────────────────
+const Settings = {
+  getApiKey: () => localStorage.getItem('hf_api_key') || '',
+  setApiKey: v  => localStorage.setItem('hf_api_key', v),
+  getModel:  () => localStorage.getItem('hf_model') || 'claude-haiku-4-5-20251001',
+  setModel:  v  => localStorage.setItem('hf_model', v),
+};
 
-/* ── Helpers ────────────────────────────────────────────────── */
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
+// ── IndexedDB ──────────────────────────────────────────────────
+const DB = {
+  _db: null,
 
-const AVATAR_COLORS = [
-  '#6366f1','#8b5cf6','#ec4899','#f59e0b',
-  '#10b981','#3b82f6','#ef4444','#14b8a6','#f97316',
-];
-
-function avatarColor(name) {
-  if (!name) return '#64748b';
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
-}
-
-function initials(name) {
-  if (!name) return '?';
-  return name.trim().split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase()).join('');
-}
-
-function formatDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso + 'T00:00:00');
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function dueCls(iso) {
-  if (!iso) return '';
-  const today = new Date(); today.setHours(0,0,0,0);
-  const due = new Date(iso + 'T00:00:00');
-  const diff = (due - today) / 86400000;
-  if (diff < 0) return 'overdue';
-  if (diff <= 2) return 'due-soon';
-  return '';
-}
-
-function getProject(id) {
-  return state.projects.find(p => p.id === id);
-}
-
-function getActiveProject() {
-  return state.activeProjectId ? getProject(state.activeProjectId) : null;
-}
-
-function allAssignees(project) {
-  const names = new Set();
-  (project?.tasks || []).forEach(t => { if (t.assignee) names.add(t.assignee); });
-  return [...names].sort();
-}
-
-/* ── Rendering ─────────────────────────────────────────────── */
-function renderAll() {
-  renderSidebar();
-  renderBoard();
-}
-
-function renderSidebar() {
-  const list = document.getElementById('projectList');
-  const avatarsEl = document.getElementById('memberAvatars');
-  list.innerHTML = '';
-
-  state.projects.forEach(p => {
-    const item = document.createElement('div');
-    item.className = 'project-item' + (p.id === state.activeProjectId ? ' active' : '');
-    item.dataset.id = p.id;
-
-    const totalTasks = (p.tasks || []).length;
-    item.innerHTML = `
-      <span class="project-dot" style="background:${p.color}"></span>
-      <span class="project-name">${escHtml(p.name)}</span>
-      <span class="project-count">${totalTasks}</span>
-      <button class="project-menu-btn" data-id="${p.id}" aria-label="Project menu" title="Options">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <circle cx="12" cy="5" r="1.2" fill="currentColor" stroke="none"/>
-          <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
-          <circle cx="12" cy="19" r="1.2" fill="currentColor" stroke="none"/>
-        </svg>
-      </button>
-    `;
-
-    item.addEventListener('click', (e) => {
-      if (e.target.closest('.project-menu-btn') || e.target.closest('.project-dropdown')) return;
-      setActiveProject(p.id);
+  init() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('HomeFinances_v1', 1);
+      req.onupgradeneeded = ({ target: { result: db } }) => {
+        if (!db.objectStoreNames.contains('transactions')) {
+          db.createObjectStore('transactions', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('files')) {
+          db.createObjectStore('files', { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = ({ target: { result } }) => { this._db = result; resolve(); };
+      req.onerror   = () => reject(req.error);
     });
+  },
 
-    item.querySelector('.project-menu-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      openProjectDropdown(e.currentTarget, p.id);
+  _store(name, mode) {
+    return this._db.transaction(name, mode).objectStore(name);
+  },
+
+  put(store, data) {
+    return new Promise((resolve, reject) => {
+      const req = this._store(store, 'readwrite').put(data);
+      req.onsuccess = () => resolve();
+      req.onerror   = () => reject(req.error);
     });
+  },
 
-    list.appendChild(item);
+  getAll(store) {
+    return new Promise((resolve, reject) => {
+      const req = this._store(store, 'readonly').getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => reject(req.error);
+    });
+  },
+
+  delete(store, id) {
+    return new Promise((resolve, reject) => {
+      const req = this._store(store, 'readwrite').delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror   = () => reject(req.error);
+    });
+  },
+
+  clear(store) {
+    return new Promise((resolve, reject) => {
+      const req = this._store(store, 'readwrite').clear();
+      req.onsuccess = () => resolve();
+      req.onerror   = () => reject(req.error);
+    });
+  },
+};
+
+// ── PDF text extraction ────────────────────────────────────────
+async function extractPDFText(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf    = await pdfjsLib.getDocument({ data: buffer }).promise;
+  let text = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page    = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(item => item.str).join(' ') + '\n';
+  }
+  return text;
+}
+
+// ── Claude API ─────────────────────────────────────────────────
+async function parseWithClaude(pdfText, model, apiKey) {
+  const prompt = `Eres un experto en analisis de estados de cuenta bancarios.
+
+Extrae TODAS las transacciones del siguiente texto y devuelve un array JSON valido.
+
+Para cada transaccion usa exactamente estos campos:
+- id: string unico (ej: "tx_001")
+- date: fecha en formato YYYY-MM-DD
+- description: nombre del comercio limpio y legible
+- category: EXACTAMENTE una de estas: Viajes, Restaurantes, Supermercado, Alimentacion, Entretenimiento, Transporte, Gasolina, Ropa, Servicios, Pago de Tarjeta, Otro
+- amount: monto en MXN (numero, positivo=gasto, negativo=pago o abono)
+- originalAmount: monto en la moneda original (numero)
+- originalCurrency: MXN, EUR, USD, CHF, GBP, etc.
+- account: Credito o Debito
+- bank: nombre del banco
+
+Clasificacion:
+- Hoteles, aerolineas, Airbnb, aeropuertos, autopistas internacionales = Viajes
+- Restaurantes, cafes, bares, comida rapida = Restaurantes
+- Walmart, Soriana, Chedraui, Costco, HEB, supermercados = Supermercado
+- Panaderias, tiendas de abarrotes, comida local = Alimentacion
+- Cines, museos, deportes, eventos, parques = Entretenimiento
+- Uber, taxi, bus, metro, peaje, SANEF, CTS = Transporte
+- Gasolineras, PEMEX, BP, Shell = Gasolina
+- Ropa, zapatos, H&M, Zara, accesorios = Ropa
+- Netflix, Spotify, Google, servicios digitales, suscripciones = Servicios
+- Pagos de tarjeta, liquidacion de credito = Pago de Tarjeta
+- Resto = Otro
+
+RESPONDE SOLO con el array JSON. Sin texto adicional, sin markdown.
+
+Texto del estado de cuenta:
+${pdfText.substring(0, 14000)}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 8096,
+      messages: [{ role: 'user', content: prompt }],
+    }),
   });
 
-  // Member avatars from active project
-  const proj = getActiveProject();
-  const members = proj ? allAssignees(proj) : [];
-  avatarsEl.innerHTML = members.slice(0, 8).map(n => `
-    <div class="avatar" style="background:${avatarColor(n)}" title="${escHtml(n)}">
-      ${initials(n)}
-    </div>
-  `).join('');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Error HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  const raw  = data.content[0].text.trim();
+  const match = raw.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error('Claude no devolvio un JSON valido. Verifica que el PDF contenga texto seleccionable.');
+  return JSON.parse(match[0]);
 }
 
-function renderBoard() {
-  const board = document.getElementById('board');
-  const proj = getActiveProject();
-  const addBtn = document.getElementById('addTaskBtn');
-  const filters = document.getElementById('boardFilters');
-  const title = document.getElementById('projectTitle');
-  const subtitle = document.getElementById('projectSubtitle');
+// ── Formatters ─────────────────────────────────────────────────
+function fmtMXN(n) {
+  return new Intl.NumberFormat('es-MX', {
+    style: 'currency', currency: 'MXN', minimumFractionDigits: 2,
+  }).format(n || 0);
+}
 
-  if (!proj) {
-    board.innerHTML = '';
-    board.appendChild(document.getElementById('emptyState') || createEmptyState());
-    document.getElementById('emptyState').style.display = 'flex';
-    addBtn.disabled = true;
-    filters.style.display = 'none';
-    title.textContent = 'Select a project';
-    subtitle.textContent = '';
+function fmtDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  return `${d} ${months[+m - 1]} ${y}`;
+}
+
+function monthLabel(ym) {
+  if (!ym) return '';
+  const [y, m] = ym.split('-');
+  const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  return `${months[+m - 1]} ${y}`;
+}
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// ── Toast ──────────────────────────────────────────────────────
+let _toastTimer;
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = `toast${type ? ' ' + type : ''}`;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.className = 'toast hidden'; }, 3600);
+}
+
+// ── Navigation ─────────────────────────────────────────────────
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`view-${name}`)?.classList.remove('hidden');
+  document.querySelector(`[data-view="${name}"]`)?.classList.add('active');
+
+  if (name === 'dashboard')    renderDashboard();
+  if (name === 'upload')       renderFiles();
+  if (name === 'transactions') renderTransactions();
+  if (name === 'settings')     renderSettings();
+}
+
+// ── Charts ─────────────────────────────────────────────────────
+const _charts = {};
+
+function destroyChart(k) { if (_charts[k]) { _charts[k].destroy(); delete _charts[k]; } }
+
+function renderCategoryChart(tx) {
+  destroyChart('cat');
+  const expenses = tx.filter(t => t.amount > 0 && t.category !== 'Pago de Tarjeta');
+  const totals   = {};
+  expenses.forEach(t => { totals[t.category] = (totals[t.category] || 0) + t.amount; });
+
+  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(([k]) => k);
+  const data   = sorted.map(([, v]) => +v.toFixed(2));
+  const colors = labels.map(l => CAT_COLORS[l] || '#94a3b8');
+
+  const ctx = document.getElementById('chartCategory');
+  if (!ctx) return;
+
+  const total = data.reduce((a, b) => a + b, 0);
+  _charts.cat = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 }, padding: 10 } },
+        tooltip: {
+          callbacks: {
+            label: c => ` ${c.label}: ${fmtMXN(c.raw)} (${Math.round(c.raw / total * 100)}%)`,
+          },
+        },
+      },
+    },
+  });
+}
+
+function renderMonthlyChart(tx) {
+  destroyChart('monthly');
+  const expenses = tx.filter(t => t.amount > 0 && t.category !== 'Pago de Tarjeta');
+  const totals   = {};
+  expenses.forEach(t => {
+    const k = t.date ? t.date.substring(0, 7) : '0000-00';
+    totals[k] = (totals[k] || 0) + t.amount;
+  });
+
+  const sorted = Object.entries(totals).sort(([a], [b]) => a.localeCompare(b));
+  const labels = sorted.map(([k]) => monthLabel(k));
+  const data   = sorted.map(([, v]) => +v.toFixed(2));
+
+  const ctx = document.getElementById('chartMonthly');
+  if (!ctx) return;
+
+  _charts.monthly = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Gastos MXN',
+        data,
+        backgroundColor: '#6366f1',
+        borderRadius: 5,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { callback: v => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v) },
+        },
+      },
+    },
+  });
+}
+
+// ── Dashboard ──────────────────────────────────────────────────
+async function renderDashboard() {
+  const allTx = await DB.getAll('transactions');
+
+  // Populate period selector
+  const sel    = document.getElementById('dashPeriod');
+  const months = [...new Set(allTx.map(t => t.date?.substring(0, 7)).filter(Boolean))].sort().reverse();
+  const existing = [...sel.options].map(o => o.value);
+  months.forEach(m => {
+    if (!existing.includes(m)) sel.add(new Option(monthLabel(m), m), 1);
+  });
+
+  const period = sel.value;
+  const tx     = period === 'all' ? allTx : allTx.filter(t => t.date?.startsWith(period));
+
+  document.getElementById('dashSubtitle').textContent =
+    period === 'all'
+      ? `${allTx.length} transacciones en total`
+      : `${tx.length} transacciones — ${monthLabel(period)}`;
+
+  const expenses  = tx.filter(t => t.amount > 0 && t.category !== 'Pago de Tarjeta');
+  const total     = expenses.reduce((s, t) => s + t.amount, 0);
+  const catTotals = {};
+  expenses.forEach(t => { catTotals[t.category] = (catTotals[t.category] || 0) + t.amount; });
+  const topCat = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0];
+  const avg    = expenses.length > 0 ? total / expenses.length : 0;
+
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card">
+      <p class="stat-label">Total Gastos</p>
+      <p class="stat-value">${fmtMXN(total)}</p>
+      <p class="stat-sub">${expenses.length} transacciones</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Mayor Categoria</p>
+      <p class="stat-value" style="font-size:1.1rem">${topCat ? topCat[0] : '—'}</p>
+      <p class="stat-sub">${topCat ? fmtMXN(topCat[1]) : 'Sin datos'}</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Total Mov.</p>
+      <p class="stat-value">${tx.length}</p>
+      <p class="stat-sub">${expenses.length} gastos</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Promedio / gasto</p>
+      <p class="stat-value">${fmtMXN(avg)}</p>
+      <p class="stat-sub">por transaccion</p>
+    </div>
+  `;
+
+  renderCategoryChart(tx);
+  renderMonthlyChart(tx);
+
+  const recent = [...allTx]
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .slice(0, 10);
+
+  const el = document.getElementById('recentList');
+  if (!recent.length) {
+    el.innerHTML = '<p class="empty">Sube un estado de cuenta para ver tus transacciones aqui.</p>';
     return;
   }
 
-  title.textContent = proj.name;
-  const total = (proj.tasks || []).length;
-  const done = (proj.tasks || []).filter(t => t.status === 'done').length;
-  subtitle.textContent = `${done}/${total} tasks complete`;
-  addBtn.disabled = false;
-  filters.style.display = 'flex';
-
-  // Update filter assignees
-  updateAssigneeFilter(proj);
-
-  // Update stats
-  renderStats(proj);
-
-  const filterPriority = document.getElementById('filterPriority').value;
-  const filterAssignee = document.getElementById('filterAssignee').value;
-  const search = document.getElementById('searchInput').value.toLowerCase().trim();
-
-  const columns = [
-    { id: 'todo',       label: 'To Do',       cls: 'col-todo' },
-    { id: 'inprogress', label: 'In Progress',  cls: 'col-inprogress' },
-    { id: 'done',       label: 'Done',         cls: 'col-done' },
-  ];
-
-  board.innerHTML = '';
-
-  columns.forEach(col => {
-    const tasks = (proj.tasks || []).filter(t => {
-      if (t.status !== col.id) return false;
-      if (filterPriority && t.priority !== filterPriority) return false;
-      if (filterAssignee && t.assignee !== filterAssignee) return false;
-      if (search && !t.title.toLowerCase().includes(search) && !(t.description || '').toLowerCase().includes(search)) return false;
-      return true;
-    });
-
-    const colEl = document.createElement('div');
-    colEl.className = `column ${col.cls}`;
-    colEl.innerHTML = `
-      <div class="column-header">
-        <span class="column-indicator"></span>
-        <span class="column-title">${col.label}</span>
-        <span class="column-badge">${tasks.length}</span>
+  el.innerHTML = recent.map(t => {
+    const color = CAT_COLORS[t.category] || '#94a3b8';
+    return `
+      <div class="recent-item">
+        <div class="recent-left">
+          <span class="recent-date">${fmtDate(t.date)}</span>
+          <span class="recent-desc">${esc(t.description)}</span>
+          <span class="cat-badge" style="background:${color}1a;color:${color}">${esc(t.category)}</span>
+        </div>
+        <span class="recent-amount${t.amount < 0 ? ' credit' : ''}">${fmtMXN(t.amount)}</span>
       </div>
     `;
+  }).join('');
+}
 
-    const body = document.createElement('div');
-    body.className = 'column-body';
-    body.dataset.status = col.id;
-    setupDropZone(body);
+// ── Transactions ───────────────────────────────────────────────
+const txState = { page: 1, search: '', month: 'all', category: 'all' };
 
-    if (tasks.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'column-empty';
-      empty.textContent = 'No tasks';
-      body.appendChild(empty);
-    } else {
-      tasks.forEach(task => {
-        body.appendChild(createTaskCard(task));
+async function renderTransactions() {
+  const allTx = await DB.getAll('transactions');
+  const months = [...new Set(allTx.map(t => t.date?.substring(0, 7)).filter(Boolean))].sort().reverse();
+  const sel    = document.getElementById('txMonth');
+  const existing = [...sel.options].map(o => o.value);
+  months.forEach(m => {
+    if (!existing.includes(m)) sel.add(new Option(monthLabel(m), m));
+  });
+  applyTxFilters(allTx);
+}
+
+function applyTxFilters(allTx) {
+  const q = txState.search.toLowerCase();
+  const filtered = allTx.filter(t => {
+    if (txState.month !== 'all' && !t.date?.startsWith(txState.month)) return false;
+    if (txState.category !== 'all' && t.category !== txState.category) return false;
+    if (q && !t.description?.toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  txState.page = Math.min(txState.page, pages);
+
+  const page = filtered.slice((txState.page - 1) * PAGE_SIZE, txState.page * PAGE_SIZE);
+
+  document.getElementById('txSubtitle').textContent  = `${total} transacciones`;
+  document.getElementById('txCountLabel').textContent = `Mostrando ${page.length} de ${total}`;
+
+  const body = document.getElementById('txBody');
+  if (!page.length) {
+    body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">Sin resultados</td></tr>`;
+  } else {
+    body.innerHTML = page.map(t => {
+      const color = CAT_COLORS[t.category] || '#94a3b8';
+      const origFmt = t.originalAmount != null
+        ? `${t.originalCurrency || ''} ${(+t.originalAmount).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+        : '';
+      return `
+        <tr>
+          <td style="white-space:nowrap">${fmtDate(t.date)}</td>
+          <td>${esc(t.description || '')}</td>
+          <td><span class="cat-badge" style="background:${color}1a;color:${color}">${esc(t.category || '')}</span></td>
+          <td>${esc(t.originalCurrency || '')}</td>
+          <td class="right">${origFmt}</td>
+          <td class="right ${t.amount < 0 ? 'amount-neg' : 'amount-pos'}">${fmtMXN(t.amount)}</td>
+          <td>${esc(t.account || '')}</td>
+          <td>${esc(t.bank || '')}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Pagination
+  const pag = document.getElementById('pagination');
+  if (pages <= 1) { pag.innerHTML = ''; return; }
+
+  let html = '';
+  if (txState.page > 1) html += `<button class="page-btn" data-p="${txState.page - 1}">&lsaquo;</button>`;
+
+  const start = Math.max(1, txState.page - 3);
+  const end   = Math.min(pages, txState.page + 3);
+  for (let i = start; i <= end; i++) {
+    html += `<button class="page-btn${i === txState.page ? ' active' : ''}" data-p="${i}">${i}</button>`;
+  }
+  if (txState.page < pages) html += `<button class="page-btn" data-p="${txState.page + 1}">&rsaquo;</button>`;
+
+  pag.innerHTML = html;
+  pag.querySelectorAll('.page-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      txState.page = +btn.dataset.p;
+      applyTxFilters(await DB.getAll('transactions'));
+    });
+  });
+}
+
+// ── Upload ─────────────────────────────────────────────────────
+async function renderFiles() {
+  const files  = await DB.getAll('files');
+  const list   = document.getElementById('filesList');
+  if (!files.length) {
+    list.innerHTML = '<p class="empty">No hay archivos procesados aun.</p>';
+    return;
+  }
+
+  const sorted = [...files].sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+  list.innerHTML = sorted.map(f => `
+    <div class="file-item">
+      <div>
+        <p class="file-name">${esc(f.name)}</p>
+        <p class="file-meta">${f.txCount} transacciones &bull; ${f.uploadedAt ? new Date(f.uploadedAt).toLocaleDateString('es-MX') : ''}</p>
+      </div>
+      <div class="file-actions">
+        <span class="badge badge--success">Procesado</span>
+        <button class="btn btn--sm btn--outline" data-del="${esc(f.id)}">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Eliminar este archivo y todas sus transacciones?')) return;
+      const fid   = btn.dataset.del;
+      const allTx = await DB.getAll('transactions');
+      for (const t of allTx.filter(t => t.fileId === fid)) await DB.delete('transactions', t.id);
+      await DB.delete('files', fid);
+      toast('Archivo eliminado', 'success');
+      renderFiles();
+    });
+  });
+}
+
+async function processFile(file) {
+  const apiKey = Settings.getApiKey();
+  if (!apiKey) {
+    toast('Configura tu API Key en Configuracion primero', 'error');
+    showView('settings');
+    return;
+  }
+
+  const uploadCard = document.getElementById('uploadCard');
+  const procCard   = document.getElementById('processingCard');
+  const titleEl    = document.getElementById('processingTitle');
+  const hintEl     = document.getElementById('processingHint');
+  const fill       = document.getElementById('progressFill');
+
+  uploadCard.classList.add('hidden');
+  procCard.classList.remove('hidden');
+
+  const setProgress = (pct, hint) => { fill.style.width = pct + '%'; hintEl.textContent = hint; };
+
+  try {
+    titleEl.textContent = `Procesando: ${file.name}`;
+    setProgress(10, 'Extrayendo texto del PDF...');
+
+    const text = await extractPDFText(file);
+    if (!text.trim()) throw new Error('El PDF no contiene texto seleccionable. Prueba con un PDF diferente.');
+
+    setProgress(40, 'Enviando a Claude para clasificar transacciones...');
+
+    const transactions = await parseWithClaude(text, Settings.getModel(), apiKey);
+    if (!Array.isArray(transactions) || !transactions.length) {
+      throw new Error('No se encontraron transacciones en el PDF.');
+    }
+
+    setProgress(75, `Guardando ${transactions.length} transacciones...`);
+
+    const fileId = uid();
+    const now    = new Date().toISOString();
+
+    for (let i = 0; i < transactions.length; i++) {
+      const t = transactions[i];
+      await DB.put('transactions', {
+        id:               `${fileId}_${i}`,
+        date:             t.date || '',
+        description:      t.description || '',
+        category:         t.category || 'Otro',
+        amount:           +parseFloat(t.amount || 0).toFixed(2),
+        originalAmount:   +parseFloat(t.originalAmount || t.amount || 0).toFixed(2),
+        originalCurrency: t.originalCurrency || 'MXN',
+        account:          t.account || '',
+        bank:             t.bank || '',
+        fileId,
+        createdAt: now,
       });
     }
 
-    colEl.appendChild(body);
-    board.appendChild(colEl);
+    await DB.put('files', { id: fileId, name: file.name, txCount: transactions.length, uploadedAt: now });
+
+    setProgress(100, `Listo — ${transactions.length} transacciones importadas`);
+    toast(`${transactions.length} transacciones importadas de ${file.name}`, 'success');
+
+    setTimeout(() => {
+      procCard.classList.add('hidden');
+      uploadCard.classList.remove('hidden');
+      fill.style.width = '0%';
+      renderFiles();
+    }, 1200);
+
+  } catch (err) {
+    procCard.classList.add('hidden');
+    uploadCard.classList.remove('hidden');
+    fill.style.width = '0%';
+    toast('Error: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+// ── Settings ───────────────────────────────────────────────────
+async function renderSettings() {
+  const key = Settings.getApiKey();
+  document.getElementById('apiKeyInput').value  = key ? '••••••••••••••••••••' : '';
+  document.getElementById('modelSelect').value  = Settings.getModel();
+  const allTx    = await DB.getAll('transactions');
+  const allFiles = await DB.getAll('files');
+  document.getElementById('storedTxCount').textContent   = allTx.length;
+  document.getElementById('storedFileCount').textContent = allFiles.length;
+}
+
+function updateApiStatus() {
+  const ok  = !!Settings.getApiKey();
+  const dot = document.getElementById('statusDot');
+  const lbl = document.getElementById('statusLabel');
+  dot.className   = ok ? 'status-dot ok' : 'status-dot';
+  lbl.textContent = ok ? 'API configurada' : 'API no configurada';
+}
+
+// ── CSV Export ─────────────────────────────────────────────────
+function exportCSV(rows) {
+  const header = ['Fecha','Descripcion','Categoria','Moneda','Monto Original','Monto (MXN)','Cuenta','Banco'];
+  const lines  = rows.map(t => [
+    t.date, t.description, t.category, t.originalCurrency,
+    t.originalAmount, t.amount, t.account, t.bank,
+  ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`));
+
+  const csv  = '﻿' + [header.map(h => `"${h}"`), ...lines].map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  Object.assign(document.createElement('a'), { href: url, download: 'transacciones.csv' }).click();
+  URL.revokeObjectURL(url);
+}
+
+// ── XSS helper ─────────────────────────────────────────────────
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Init ───────────────────────────────────────────────────────
+async function init() {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  await DB.init();
+  updateApiStatus();
+
+  // Sidebar navigation
+  document.querySelectorAll('[data-view]').forEach(el => {
+    el.addEventListener('click', () => showView(el.dataset.view));
   });
-}
 
-function createEmptyState() {
-  const el = document.createElement('div');
-  el.className = 'empty-state';
-  el.id = 'emptyState';
-  el.innerHTML = `
-    <div class="empty-icon">
-      <svg width="64" height="64" viewBox="0 0 28 28" fill="none">
-        <rect width="12" height="12" rx="3" fill="#6366f1" opacity="0.4"/>
-        <rect x="16" width="12" height="12" rx="3" fill="#8b5cf6" opacity="0.4"/>
-        <rect y="16" width="12" height="12" rx="3" fill="#a78bfa" opacity="0.4"/>
-        <rect x="16" y="16" width="12" height="12" rx="3" fill="#c4b5fd" opacity="0.4"/>
-      </svg>
-    </div>
-    <h2>Welcome to TeamFlow</h2>
-    <p>Create a project to get started tracking tasks with your team.</p>
-    <button class="btn-primary" id="emptyCreateBtn">Create your first project</button>
-  `;
-  el.querySelector('#emptyCreateBtn').addEventListener('click', () => openProjectModal());
-  return el;
-}
+  // Dashboard period
+  document.getElementById('dashPeriod').addEventListener('change', renderDashboard);
 
-function updateAssigneeFilter(proj) {
-  const sel = document.getElementById('filterAssignee');
-  const cur = sel.value;
-  const names = allAssignees(proj);
-  sel.innerHTML = `<option value="">All</option>` +
-    names.map(n => `<option value="${escHtml(n)}"${n === cur ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
-}
+  // Upload zone
+  const zone      = document.getElementById('uploadZone');
+  const fileInput = document.getElementById('fileInput');
 
-function renderStats(proj) {
-  const statsEl = document.getElementById('boardStats');
-  const tasks = proj.tasks || [];
-  const counts = { todo: 0, inprogress: 0, done: 0 };
-  tasks.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
-  statsEl.innerHTML = `
-    <span class="stat-item"><span class="stat-dot" style="background:#6366f1"></span>${counts.todo}</span>
-    <span class="stat-item"><span class="stat-dot" style="background:#f59e0b"></span>${counts.inprogress}</span>
-    <span class="stat-item"><span class="stat-dot" style="background:#10b981"></span>${counts.done}</span>
-  `;
-}
-
-function createTaskCard(task) {
-  const card = document.createElement('div');
-  card.className = 'task-card';
-  card.draggable = true;
-  card.dataset.taskId = task.id;
-
-  const dc = dueCls(task.dueDate);
-  const dueHtml = task.dueDate ? `
-    <span class="task-due ${dc}">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
-        <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-      </svg>
-      ${formatDate(task.dueDate)}${dc === 'overdue' ? ' !' : ''}
-    </span>` : '';
-
-  const assigneeHtml = task.assignee ? `
-    <div class="task-assignee">
-      <div class="assignee-avatar" style="background:${avatarColor(task.assignee)}">${initials(task.assignee)}</div>
-      <span class="assignee-name">${escHtml(task.assignee)}</span>
-    </div>` : '<div></div>';
-
-  card.innerHTML = `
-    <div class="task-priority-bar priority-${task.priority}"></div>
-    <div class="task-header">
-      <span class="task-title">${escHtml(task.title)}</span>
-      <span class="task-badge badge-${task.priority}">${task.priority}</span>
-    </div>
-    ${task.description ? `<p class="task-description">${escHtml(task.description)}</p>` : ''}
-    <div class="task-footer">
-      ${assigneeHtml}
-      <div class="task-meta">
-        ${dueHtml}
-        <button class="task-edit-btn" aria-label="Edit task">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-        </button>
-      </div>
-    </div>
-  `;
-
-  card.querySelector('.task-edit-btn').addEventListener('click', (e) => {
+  document.getElementById('selectFileBtn').addEventListener('click', e => {
     e.stopPropagation();
-    openTaskModal(task);
+    fileInput.click();
   });
+  zone.addEventListener('click', () => fileInput.click());
 
-  card.addEventListener('click', () => openTaskModal(task));
-
-  // Drag events
-  card.addEventListener('dragstart', onDragStart);
-  card.addEventListener('dragend', onDragEnd);
-
-  return card;
-}
-
-/* ── Drag & Drop ────────────────────────────────────────────── */
-let dragTaskId = null;
-let dragPlaceholder = null;
-
-function onDragStart(e) {
-  dragTaskId = e.currentTarget.dataset.taskId;
-  e.currentTarget.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', dragTaskId);
-
-  dragPlaceholder = document.createElement('div');
-  dragPlaceholder.className = 'task-card drag-placeholder';
-  dragPlaceholder.style.height = e.currentTarget.offsetHeight + 'px';
-}
-
-function onDragEnd(e) {
-  e.currentTarget.classList.remove('dragging');
-  if (dragPlaceholder && dragPlaceholder.parentNode) {
-    dragPlaceholder.parentNode.removeChild(dragPlaceholder);
-  }
-  document.querySelectorAll('.column-body').forEach(b => b.classList.remove('drag-over'));
-  dragTaskId = null;
-  dragPlaceholder = null;
-}
-
-function setupDropZone(body) {
-  body.addEventListener('dragover', (e) => {
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    body.classList.add('drag-over');
-
-    const afterEl = getDragAfterElement(body, e.clientY);
-    if (dragPlaceholder) {
-      if (afterEl == null) {
-        body.appendChild(dragPlaceholder);
-      } else {
-        body.insertBefore(dragPlaceholder, afterEl);
-      }
-    }
+    zone.classList.remove('dragover');
+    const f = [...e.dataTransfer.files].find(f => f.type === 'application/pdf');
+    if (f) processFile(f);
+    else toast('Solo se aceptan archivos PDF', 'error');
   });
 
-  body.addEventListener('dragleave', (e) => {
-    if (!body.contains(e.relatedTarget)) {
-      body.classList.remove('drag-over');
-    }
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) processFile(fileInput.files[0]);
+    fileInput.value = '';
   });
 
-  body.addEventListener('drop', (e) => {
-    e.preventDefault();
-    body.classList.remove('drag-over');
-    if (!dragTaskId) return;
-
-    const newStatus = body.dataset.status;
-    const proj = getActiveProject();
-    if (!proj) return;
-
-    const task = proj.tasks.find(t => t.id === dragTaskId);
-    if (!task) return;
-
-    task.status = newStatus;
-    task.updatedAt = new Date().toISOString();
-
-    // Reorder within tasks array based on DOM position
-    const afterEl = getDragAfterElement(body, e.clientY);
-    const cards = [...body.querySelectorAll('.task-card:not(.drag-placeholder):not(.dragging)')];
-    const afterId = afterEl ? afterEl.dataset.taskId : null;
-
-    // Move task in array
-    const taskIdx = proj.tasks.findIndex(t => t.id === dragTaskId);
-    proj.tasks.splice(taskIdx, 1);
-
-    if (afterId) {
-      const afterIdx = proj.tasks.findIndex(t => t.id === afterId);
-      proj.tasks.splice(afterIdx, 0, task);
-    } else {
-      // Find last task with this status and append after it
-      let lastIdx = -1;
-      proj.tasks.forEach((t, i) => { if (t.status === newStatus) lastIdx = i; });
-      proj.tasks.splice(lastIdx + 1, 0, task);
-    }
-
-    save();
-    renderAll();
-  });
-}
-
-function getDragAfterElement(container, y) {
-  const draggables = [...container.querySelectorAll('.task-card:not(.dragging):not(.drag-placeholder)')];
-  return draggables.reduce((closest, child) => {
-    const box = child.getBoundingClientRect();
-    const offset = y - box.top - box.height / 2;
-    if (offset < 0 && offset > closest.offset) {
-      return { offset, element: child };
-    }
-    return closest;
-  }, { offset: Number.NEGATIVE_INFINITY }).element;
-}
-
-/* ── Project Modal ──────────────────────────────────────────── */
-let editingProjectId = null;
-let selectedColor = '#6366f1';
-
-function openProjectModal(projectId = null) {
-  editingProjectId = projectId;
-  const modal = document.getElementById('projectModal');
-  const title = document.getElementById('projectModalTitle');
-  const submitBtn = document.getElementById('projectSubmitBtn');
-  const nameEl = document.getElementById('projectName');
-  const descEl = document.getElementById('projectDescription');
-
-  if (projectId) {
-    const proj = getProject(projectId);
-    title.textContent = 'Edit Project';
-    submitBtn.textContent = 'Save Changes';
-    nameEl.value = proj.name;
-    descEl.value = proj.description || '';
-    selectColor(proj.color);
-  } else {
-    title.textContent = 'New Project';
-    submitBtn.textContent = 'Create Project';
-    document.getElementById('projectForm').reset();
-    selectColor('#6366f1');
-  }
-
-  openModal('projectModal');
-  nameEl.focus();
-}
-
-function selectColor(color) {
-  selectedColor = color;
-  document.querySelectorAll('.color-swatch').forEach(s => {
-    s.classList.toggle('selected', s.dataset.color === color);
-  });
-}
-
-document.getElementById('colorPicker').addEventListener('click', (e) => {
-  const swatch = e.target.closest('.color-swatch');
-  if (swatch) selectColor(swatch.dataset.color);
-});
-
-document.getElementById('projectForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const name = document.getElementById('projectName').value.trim();
-  const description = document.getElementById('projectDescription').value.trim();
-
-  if (editingProjectId) {
-    const proj = getProject(editingProjectId);
-    proj.name = name;
-    proj.description = description;
-    proj.color = selectedColor;
-    proj.updatedAt = new Date().toISOString();
-  } else {
-    const proj = {
-      id: uid(),
-      name,
-      description,
-      color: selectedColor,
-      tasks: [],
-      createdAt: new Date().toISOString(),
-    };
-    state.projects.push(proj);
-    state.activeProjectId = proj.id;
-  }
-
-  save();
-  closeModal('projectModal');
-  renderAll();
-});
-
-/* ── Task Modal ─────────────────────────────────────────────── */
-function openTaskModal(task = null, defaultStatus = 'todo') {
-  const titleEl = document.getElementById('taskModalTitle');
-  const submitBtn = document.getElementById('taskSubmitBtn');
-  const deleteBtn = document.getElementById('deleteTaskBtn');
-  const form = document.getElementById('taskForm');
-
-  if (task) {
-    titleEl.textContent = 'Edit Task';
-    submitBtn.textContent = 'Save Changes';
-    deleteBtn.style.display = 'flex';
-    document.getElementById('taskId').value = task.id;
-    document.getElementById('taskTitle').value = task.title;
-    document.getElementById('taskDescription').value = task.description || '';
-    document.getElementById('taskAssignee').value = task.assignee || '';
-    document.getElementById('taskDueDate').value = task.dueDate || '';
-    document.getElementById('taskPriority').value = task.priority || 'medium';
-    document.getElementById('taskStatusSelect').value = task.status || 'todo';
-  } else {
-    titleEl.textContent = 'New Task';
-    submitBtn.textContent = 'Add Task';
-    deleteBtn.style.display = 'none';
-    form.reset();
-    document.getElementById('taskId').value = '';
-    document.getElementById('taskStatusSelect').value = defaultStatus;
-  }
-
-  openModal('taskModal');
-  document.getElementById('taskTitle').focus();
-}
-
-document.getElementById('taskForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const proj = getActiveProject();
-  if (!proj) return;
-
-  const id = document.getElementById('taskId').value;
-  const title = document.getElementById('taskTitle').value.trim();
-  const description = document.getElementById('taskDescription').value.trim();
-  const assignee = document.getElementById('taskAssignee').value.trim();
-  const dueDate = document.getElementById('taskDueDate').value;
-  const priority = document.getElementById('taskPriority').value;
-  const status = document.getElementById('taskStatusSelect').value;
-
-  if (id) {
-    const task = proj.tasks.find(t => t.id === id);
-    if (task) {
-      Object.assign(task, { title, description, assignee, dueDate, priority, status, updatedAt: new Date().toISOString() });
-    }
-  } else {
-    proj.tasks.push({
-      id: uid(),
-      title,
-      description,
-      assignee,
-      dueDate,
-      priority,
-      status,
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  save();
-  closeModal('taskModal');
-  renderAll();
-});
-
-document.getElementById('deleteTaskBtn').addEventListener('click', () => {
-  const id = document.getElementById('taskId').value;
-  if (!id) return;
-  const proj = getActiveProject();
-  if (!proj) return;
-  proj.tasks = proj.tasks.filter(t => t.id !== id);
-  save();
-  closeModal('taskModal');
-  renderAll();
-});
-
-/* ── Project Dropdown ───────────────────────────────────────── */
-let activeDropdown = null;
-
-function openProjectDropdown(btn, projectId) {
-  closeDropdown();
-
-  const dd = document.createElement('div');
-  dd.className = 'project-dropdown';
-  dd.innerHTML = `
-    <button data-action="edit">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-      </svg>
-      Edit
-    </button>
-    <button data-action="delete" class="danger">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-        <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-      </svg>
-      Delete
-    </button>
-  `;
-
-  dd.querySelector('[data-action="edit"]').addEventListener('click', () => {
-    closeDropdown();
-    openProjectModal(projectId);
+  // Transaction filters
+  let filterTimer;
+  document.getElementById('txSearch').addEventListener('input', e => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(async () => {
+      txState.search = e.target.value;
+      txState.page   = 1;
+      applyTxFilters(await DB.getAll('transactions'));
+    }, 280);
   });
 
-  dd.querySelector('[data-action="delete"]').addEventListener('click', () => {
-    closeDropdown();
-    openConfirmDelete(projectId);
+  document.getElementById('txMonth').addEventListener('change', async e => {
+    txState.month = e.target.value;
+    txState.page  = 1;
+    applyTxFilters(await DB.getAll('transactions'));
   });
 
-  btn.closest('.project-item').appendChild(dd);
-  activeDropdown = dd;
-
-  setTimeout(() => {
-    document.addEventListener('click', closeDropdown, { once: true });
-  }, 0);
-}
-
-function closeDropdown() {
-  if (activeDropdown) {
-    activeDropdown.remove();
-    activeDropdown = null;
-  }
-}
-
-/* ── Confirm Delete ─────────────────────────────────────────── */
-let pendingDeleteId = null;
-
-function openConfirmDelete(projectId) {
-  pendingDeleteId = projectId;
-  const proj = getProject(projectId);
-  document.getElementById('confirmText').textContent =
-    `Delete "${proj.name}"? This will permanently remove all ${(proj.tasks||[]).length} tasks. This cannot be undone.`;
-  openModal('confirmModal');
-}
-
-document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
-  if (!pendingDeleteId) return;
-  state.projects = state.projects.filter(p => p.id !== pendingDeleteId);
-  if (state.activeProjectId === pendingDeleteId) state.activeProjectId = state.projects[0]?.id || null;
-  pendingDeleteId = null;
-  save();
-  closeModal('confirmModal');
-  renderAll();
-});
-
-/* ── Modal helpers ──────────────────────────────────────────── */
-function openModal(id) {
-  document.getElementById(id).classList.add('open');
-}
-
-function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
-}
-
-document.querySelectorAll('[data-close]').forEach(btn => {
-  btn.addEventListener('click', () => closeModal(btn.dataset.close));
-});
-
-document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) closeModal(backdrop.id);
+  document.getElementById('txCategory').addEventListener('change', async e => {
+    txState.category = e.target.value;
+    txState.page     = 1;
+    applyTxFilters(await DB.getAll('transactions'));
   });
-});
 
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    document.querySelectorAll('.modal-backdrop.open').forEach(m => closeModal(m.id));
-    closeDropdown();
-  }
-});
+  // Export (transactions view)
+  document.getElementById('exportBtn').addEventListener('click', async () => {
+    const all = await DB.getAll('transactions');
+    if (!all.length) return toast('No hay transacciones para exportar', 'error');
+    exportCSV(all);
+    toast(`${all.length} transacciones exportadas`, 'success');
+  });
 
-/* ── App controls ───────────────────────────────────────────── */
-function setActiveProject(id) {
-  state.activeProjectId = id;
-  save();
-  renderAll();
-  closeMobileSidebar();
+  // Settings — save API key
+  document.getElementById('saveApiKeyBtn').addEventListener('click', () => {
+    const val = document.getElementById('apiKeyInput').value.trim();
+    if (!val || val.startsWith('•')) return toast('Ingresa una API Key valida', 'error');
+    Settings.setApiKey(val);
+    document.getElementById('apiKeyInput').value = '••••••••••••••••••••';
+    updateApiStatus();
+    toast('API Key guardada correctamente', 'success');
+  });
+
+  document.getElementById('modelSelect').addEventListener('change', e => {
+    Settings.setModel(e.target.value);
+    toast('Modelo actualizado', 'success');
+  });
+
+  // Settings — export all
+  document.getElementById('exportAllBtn').addEventListener('click', async () => {
+    const all = await DB.getAll('transactions');
+    if (!all.length) return toast('No hay transacciones aun', 'error');
+    exportCSV(all);
+    toast(`${all.length} transacciones exportadas`, 'success');
+  });
+
+  // Settings — clear all data
+  document.getElementById('clearDataBtn').addEventListener('click', async () => {
+    if (!confirm('Borrar TODOS los datos? Esta accion no se puede deshacer.')) return;
+    await DB.clear('transactions');
+    await DB.clear('files');
+    toast('Todos los datos han sido borrados', 'success');
+    renderSettings();
+  });
+
+  // Initial render
+  renderDashboard();
 }
 
-document.getElementById('newProjectBtn').addEventListener('click', () => openProjectModal());
-document.getElementById('addTaskBtn').addEventListener('click', () => openTaskModal());
-document.getElementById('emptyCreateBtn')?.addEventListener('click', () => openProjectModal());
-
-document.getElementById('filterPriority').addEventListener('change', renderBoard);
-document.getElementById('filterAssignee').addEventListener('change', renderBoard);
-document.getElementById('searchInput').addEventListener('input', renderBoard);
-
-/* ── Mobile sidebar ─────────────────────────────────────────── */
-function openMobileSidebar() {
-  document.getElementById('sidebar').classList.add('open');
-  document.getElementById('sidebarOverlay').classList.add('open');
-}
-
-function closeMobileSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('sidebarOverlay').classList.remove('open');
-}
-
-document.getElementById('mobileMenuBtn').addEventListener('click', openMobileSidebar);
-document.getElementById('sidebarOverlay').addEventListener('click', closeMobileSidebar);
-
-/* ── XSS protection ─────────────────────────────────────────── */
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-/* ── Init ───────────────────────────────────────────────────── */
-load();
-
-// Seed demo data on first run
-if (state.projects.length === 0) {
-  const demoProject = {
-    id: uid(),
-    name: 'Website Redesign',
-    description: 'Revamp the company marketing site.',
-    color: '#6366f1',
-    tasks: [
-      { id: uid(), title: 'Audit current site content', description: 'Review all pages for outdated content.', assignee: 'Alex Kim', dueDate: '', priority: 'medium', status: 'done', createdAt: new Date().toISOString() },
-      { id: uid(), title: 'Design new homepage mockup', description: 'Create high-fidelity Figma designs for the hero and feature sections.', assignee: 'Sam Rivera', dueDate: getTomorrow(3), priority: 'high', status: 'inprogress', createdAt: new Date().toISOString() },
-      { id: uid(), title: 'Set up Tailwind CSS', description: '', assignee: 'Alex Kim', dueDate: getTomorrow(1), priority: 'medium', status: 'inprogress', createdAt: new Date().toISOString() },
-      { id: uid(), title: 'Write copy for About page', description: '', assignee: 'Jordan Lee', dueDate: getTomorrow(7), priority: 'low', status: 'todo', createdAt: new Date().toISOString() },
-      { id: uid(), title: 'Implement contact form', description: 'Build and wire up the contact form with validation.', assignee: 'Sam Rivera', dueDate: getTomorrow(5), priority: 'medium', status: 'todo', createdAt: new Date().toISOString() },
-      { id: uid(), title: 'Fix broken mobile nav', description: 'Hamburger menu does not close on link tap.', assignee: 'Alex Kim', dueDate: getTomorrow(-1), priority: 'critical', status: 'todo', createdAt: new Date().toISOString() },
-    ],
-    createdAt: new Date().toISOString(),
-  };
-  state.projects.push(demoProject);
-  state.activeProjectId = demoProject.id;
-  save();
-}
-
-function getTomorrow(days) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-renderAll();
+init().catch(console.error);

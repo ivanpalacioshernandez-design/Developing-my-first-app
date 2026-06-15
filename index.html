@@ -1,238 +1,270 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TeamFlow — Project Management</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home Finances</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Sidebar -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <div class="logo">
-        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-          <rect width="12" height="12" rx="3" fill="#6366f1"/>
-          <rect x="16" width="12" height="12" rx="3" fill="#8b5cf6"/>
-          <rect y="16" width="12" height="12" rx="3" fill="#a78bfa"/>
-          <rect x="16" y="16" width="12" height="12" rx="3" fill="#c4b5fd"/>
-        </svg>
-        <span class="logo-text">TeamFlow</span>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="1" x2="12" y2="23"/>
+        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+      </svg>
+    </div>
+    <span class="brand-name">Home Finances</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-item active" data-view="dashboard">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+      Dashboard
+    </button>
+    <button class="nav-item" data-view="upload">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      Subir Estado
+    </button>
+    <button class="nav-item" data-view="transactions">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+        <line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="3" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="18" r="1" fill="currentColor" stroke="none"/>
+      </svg>
+      Transacciones
+    </button>
+    <button class="nav-item" data-view="settings">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Configuracion
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="api-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusLabel">API no configurada</span>
+    </div>
+  </div>
+</aside>
+
+<!-- Main -->
+<main class="main">
+  <!-- Toast -->
+  <div class="toast hidden" id="toast"></div>
+
+  <!-- ── Dashboard ── -->
+  <section class="view active" id="view-dashboard">
+    <div class="page-header">
+      <div>
+        <h1>Dashboard</h1>
+        <p class="subtitle" id="dashSubtitle">Cargando datos...</p>
       </div>
-      <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+      <select class="select" id="dashPeriod">
+        <option value="all">Todo el periodo</option>
+      </select>
+    </div>
+
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header"><h2>Por Categoria</h2></div>
+        <div class="chart-container"><canvas id="chartCategory"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Por Mes</h2></div>
+        <div class="chart-container"><canvas id="chartMonthly"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Transacciones Recientes</h2>
+        <button class="link-btn" data-view="transactions">Ver todas &rarr;</button>
+      </div>
+      <div id="recentList"></div>
+    </div>
+  </section>
+
+  <!-- ── Upload ── -->
+  <section class="view hidden" id="view-upload">
+    <div class="page-header">
+      <div>
+        <h1>Subir Estado de Cuenta</h1>
+        <p class="subtitle">Claude extraera y clasificara tus transacciones automaticamente</p>
+      </div>
+    </div>
+
+    <div class="card" id="uploadCard">
+      <div class="upload-zone" id="uploadZone">
+        <div class="upload-icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="12" y1="18" x2="12" y2="12"/>
+            <line x1="9" y1="15" x2="12" y2="12"/>
+            <line x1="15" y1="15" x2="12" y2="12"/>
+          </svg>
+        </div>
+        <p class="upload-title">Arrastra tu PDF aqui</p>
+        <p class="upload-hint">o haz clic para seleccionar — acepta estados de cuenta en PDF</p>
+        <input type="file" id="fileInput" accept=".pdf" hidden>
+        <button class="btn btn--primary" id="selectFileBtn">Seleccionar PDF</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="processingCard">
+      <div class="processing-row">
+        <div class="spinner"></div>
+        <div>
+          <p class="processing-title" id="processingTitle">Procesando...</p>
+          <p class="processing-hint" id="processingHint">Extrayendo texto del PDF...</p>
+        </div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2>Archivos procesados</h2></div>
+      <div id="filesList"><p class="empty">No hay archivos procesados aun.</p></div>
+    </div>
+  </section>
+
+  <!-- ── Transactions ── -->
+  <section class="view hidden" id="view-transactions">
+    <div class="page-header">
+      <div>
+        <h1>Transacciones</h1>
+        <p class="subtitle" id="txSubtitle">0 transacciones</p>
+      </div>
+      <button class="btn btn--outline" id="exportBtn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
+        Exportar CSV
       </button>
     </div>
 
-    <div class="sidebar-section">
-      <span class="sidebar-label">Projects</span>
-      <button class="btn-new-project" id="newProjectBtn">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        New Project
-      </button>
+    <div class="filters">
+      <input class="input" type="text" id="txSearch" placeholder="Buscar descripcion...">
+      <select class="select" id="txMonth"><option value="all">Todos los meses</option></select>
+      <select class="select" id="txCategory">
+        <option value="all">Todas las categorias</option>
+        <option>Viajes</option>
+        <option>Restaurantes</option>
+        <option>Supermercado</option>
+        <option>Alimentacion</option>
+        <option>Entretenimiento</option>
+        <option>Transporte</option>
+        <option>Gasolina</option>
+        <option>Ropa</option>
+        <option>Servicios</option>
+        <option>Pago de Tarjeta</option>
+        <option>Otro</option>
+      </select>
     </div>
 
-    <nav class="project-list" id="projectList"></nav>
-
-    <div class="sidebar-footer">
-      <div class="member-avatars" id="memberAvatars"></div>
-    </div>
-  </aside>
-
-  <!-- Main content -->
-  <main class="main" id="main">
-    <!-- Top bar -->
-    <header class="topbar">
-      <div class="topbar-left">
-        <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
-          </svg>
-        </button>
-        <div class="project-title-wrap">
-          <h1 class="project-title" id="projectTitle">Select a project</h1>
-          <span class="project-subtitle" id="projectSubtitle"></span>
-        </div>
+    <div class="card">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Descripcion</th>
+              <th>Categoria</th>
+              <th>Moneda</th>
+              <th class="right">Monto Original</th>
+              <th class="right">Monto (MXN)</th>
+              <th>Cuenta</th>
+              <th>Banco</th>
+            </tr>
+          </thead>
+          <tbody id="txBody"></tbody>
+        </table>
       </div>
-      <div class="topbar-right">
-        <div class="search-wrap">
-          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input type="text" class="search-input" id="searchInput" placeholder="Search tasks…" />
-        </div>
-        <button class="btn-primary" id="addTaskBtn" disabled>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          Add Task
-        </button>
-      </div>
-    </header>
-
-    <!-- Board filters -->
-    <div class="board-filters" id="boardFilters" style="display:none">
-      <div class="filter-group">
-        <label class="filter-label">Priority</label>
-        <select class="filter-select" id="filterPriority">
-          <option value="">All</option>
-          <option value="critical">Critical</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label class="filter-label">Assignee</label>
-        <select class="filter-select" id="filterAssignee">
-          <option value="">All</option>
-        </select>
-      </div>
-      <div class="board-stats" id="boardStats"></div>
-    </div>
-
-    <!-- Kanban board -->
-    <div class="board" id="board">
-      <div class="empty-state" id="emptyState">
-        <div class="empty-icon">
-          <svg width="64" height="64" viewBox="0 0 28 28" fill="none">
-            <rect width="12" height="12" rx="3" fill="#6366f1" opacity="0.4"/>
-            <rect x="16" width="12" height="12" rx="3" fill="#8b5cf6" opacity="0.4"/>
-            <rect y="16" width="12" height="12" rx="3" fill="#a78bfa" opacity="0.4"/>
-            <rect x="16" y="16" width="12" height="12" rx="3" fill="#c4b5fd" opacity="0.4"/>
-          </svg>
-        </div>
-        <h2>Welcome to TeamFlow</h2>
-        <p>Create a project to get started tracking tasks with your team.</p>
-        <button class="btn-primary" id="emptyCreateBtn">Create your first project</button>
+      <div class="table-footer">
+        <span id="txCountLabel"></span>
+        <div class="pagination" id="pagination"></div>
       </div>
     </div>
-  </main>
+  </section>
 
-  <!-- Overlay for mobile sidebar -->
-  <div class="sidebar-overlay" id="sidebarOverlay"></div>
-
-  <!-- Project Modal -->
-  <div class="modal-backdrop" id="projectModal" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
-    <div class="modal">
-      <div class="modal-header">
-        <h2 class="modal-title" id="projectModalTitle">New Project</h2>
-        <button class="modal-close" data-close="projectModal" aria-label="Close">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
+  <!-- ── Settings ── -->
+  <section class="view hidden" id="view-settings">
+    <div class="page-header">
+      <div>
+        <h1>Configuracion</h1>
+        <p class="subtitle">API key, modelo y preferencias</p>
       </div>
-      <form id="projectForm">
-        <div class="form-group">
-          <label class="form-label" for="projectName">Project Name <span class="required">*</span></label>
-          <input type="text" class="form-input" id="projectName" placeholder="e.g. Website Redesign" required maxlength="60" />
+    </div>
+
+    <div class="settings-grid">
+      <div class="card">
+        <div class="card-header"><h2>Anthropic API</h2></div>
+        <div class="form-field">
+          <label class="label">API Key</label>
+          <div class="input-group">
+            <input type="password" class="input" id="apiKeyInput" placeholder="sk-ant-api03-...">
+            <button class="btn btn--primary" id="saveApiKeyBtn">Guardar</button>
+          </div>
+          <p class="field-hint">Se guarda solo en tu navegador (localStorage). Nunca pasa por ningun servidor propio — va directo a la API de Anthropic.</p>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="projectDescription">Description</label>
-          <textarea class="form-input form-textarea" id="projectDescription" placeholder="What is this project about?" rows="3" maxlength="200"></textarea>
+        <div class="form-field">
+          <label class="label">Modelo de Claude</label>
+          <select class="select full-width" id="modelSelect">
+            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 — rapido y economico</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6 — mayor precision</option>
+          </select>
+          <p class="field-hint">Haiku es suficiente para extraer transacciones. Sonnet es mas preciso con PDFs complejos o con formato irregular.</p>
         </div>
-        <div class="form-group">
-          <label class="form-label">Color</label>
-          <div class="color-picker" id="colorPicker">
-            <button type="button" class="color-swatch selected" data-color="#6366f1" style="background:#6366f1" aria-label="Indigo"></button>
-            <button type="button" class="color-swatch" data-color="#8b5cf6" style="background:#8b5cf6" aria-label="Purple"></button>
-            <button type="button" class="color-swatch" data-color="#ec4899" style="background:#ec4899" aria-label="Pink"></button>
-            <button type="button" class="color-swatch" data-color="#f59e0b" style="background:#f59e0b" aria-label="Amber"></button>
-            <button type="button" class="color-swatch" data-color="#10b981" style="background:#10b981" aria-label="Emerald"></button>
-            <button type="button" class="color-swatch" data-color="#3b82f6" style="background:#3b82f6" aria-label="Blue"></button>
-            <button type="button" class="color-swatch" data-color="#ef4444" style="background:#ef4444" aria-label="Red"></button>
-            <button type="button" class="color-swatch" data-color="#14b8a6" style="background:#14b8a6" aria-label="Teal"></button>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h2>Datos almacenados</h2></div>
+        <div class="stats-mini">
+          <div class="stat-mini-item">
+            <span class="stat-mini-value" id="storedTxCount">0</span>
+            <span class="stat-mini-label">Transacciones</span>
+          </div>
+          <div class="stat-mini-item">
+            <span class="stat-mini-value" id="storedFileCount">0</span>
+            <span class="stat-mini-label">Archivos</span>
           </div>
         </div>
-        <div class="modal-actions">
-          <button type="button" class="btn-secondary" data-close="projectModal">Cancel</button>
-          <button type="submit" class="btn-primary" id="projectSubmitBtn">Create Project</button>
+        <div class="btn-row">
+          <button class="btn btn--outline" id="exportAllBtn">Exportar todo a CSV</button>
+          <button class="btn btn--danger" id="clearDataBtn">Borrar todo</button>
         </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Task Modal -->
-  <div class="modal-backdrop" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
-    <div class="modal modal-lg">
-      <div class="modal-header">
-        <h2 class="modal-title" id="taskModalTitle">New Task</h2>
-        <button class="modal-close" data-close="taskModal" aria-label="Close">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
       </div>
-      <form id="taskForm">
-        <input type="hidden" id="taskId" />
-        <input type="hidden" id="taskStatus" value="todo" />
-        <div class="form-group">
-          <label class="form-label" for="taskTitle">Title <span class="required">*</span></label>
-          <input type="text" class="form-input" id="taskTitle" placeholder="What needs to be done?" required maxlength="120" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="taskDescription">Description</label>
-          <textarea class="form-input form-textarea" id="taskDescription" placeholder="Add more details…" rows="4" maxlength="1000"></textarea>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="taskAssignee">Assignee</label>
-            <input type="text" class="form-input" id="taskAssignee" placeholder="Team member name" maxlength="50" />
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="taskDueDate">Due Date</label>
-            <input type="date" class="form-input" id="taskDueDate" />
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="taskPriority">Priority</label>
-            <select class="form-input form-select" id="taskPriority">
-              <option value="low">Low</option>
-              <option value="medium" selected>Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="taskStatusSelect">Status</label>
-            <select class="form-input form-select" id="taskStatusSelect">
-              <option value="todo">To Do</option>
-              <option value="inprogress">In Progress</option>
-              <option value="done">Done</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="btn-danger btn-delete-task" id="deleteTaskBtn" style="display:none">Delete Task</button>
-          <div class="modal-actions-right">
-            <button type="button" class="btn-secondary" data-close="taskModal">Cancel</button>
-            <button type="submit" class="btn-primary" id="taskSubmitBtn">Add Task</button>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div>
 
-  <!-- Delete Project Confirm Modal -->
-  <div class="modal-backdrop" id="confirmModal" role="dialog" aria-modal="true">
-    <div class="modal modal-sm">
-      <div class="modal-header">
-        <h2 class="modal-title">Delete Project?</h2>
-      </div>
-      <p class="confirm-text" id="confirmText">This will permanently delete the project and all its tasks. This cannot be undone.</p>
-      <div class="modal-actions">
-        <button class="btn-secondary" data-close="confirmModal">Cancel</button>
-        <button class="btn-danger" id="confirmDeleteBtn">Delete</button>
+      <div class="card">
+        <div class="card-header">
+          <h2>Google Drive</h2>
+          <span class="badge badge--soon">Proximamente</span>
+        </div>
+        <p class="field-hint" style="margin-top:4px">La integracion con Google Drive te permitira guardar tus PDFs automaticamente al subirlos y sincronizar transacciones entre dispositivos.</p>
+        <p class="field-hint" style="margin-top:10px">Por ahora los PDFs se procesan localmente y las transacciones quedan en tu navegador.</p>
       </div>
     </div>
-  </div>
+  </section>
+</main>
 
-  <script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
