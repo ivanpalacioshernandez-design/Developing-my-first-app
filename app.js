@@ -93,7 +93,75 @@ async function extractPDFText(file) {
     const content = await page.getTextContent();
     text += content.items.map(item => item.str).join(' ') + '\n';
   }
-  return text;
+  return { text, pdf };
+}
+
+// ── Render PDF page to base64 JPEG (for scanned PDFs) ─────────
+async function renderPageToBase64(pdfPage) {
+  const viewport = pdfPage.getViewport({ scale: 1.5 });
+  const canvas   = document.createElement('canvas');
+  canvas.width   = viewport.width;
+  canvas.height  = viewport.height;
+  await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  return canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
+}
+
+// ── Claude Vision API (PDFs escaneados sin texto) ──────────────
+async function parseWithClaudeVision(pdf, model, apiKey) {
+  const BATCH = 8;
+  const total = pdf.numPages;
+  let allTransactions = [];
+
+  for (let start = 1; start <= total; start += BATCH) {
+    const end     = Math.min(start + BATCH - 1, total);
+    const content = [];
+
+    for (let p = start; p <= end; p++) {
+      const page = await pdf.getPage(p);
+      const b64  = await renderPageToBase64(page);
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } });
+    }
+
+    content.push({
+      type: 'text',
+      text: `Paginas ${start}-${end} de un estado de cuenta bancario mexicano.
+Extrae TODAS las transacciones visibles y devuelve un array JSON con estos campos exactos:
+- id (ej "tx_001"), date (YYYY-MM-DD), description (nombre limpio del comercio o concepto),
+  category (exactamente una de: Viajes, Restaurantes, Supermercado, Alimentacion, Entretenimiento, Transporte, Gasolina, Ropa, Servicios, Pago de Tarjeta, Otro),
+  amount (numero en MXN: positivo=cargo/gasto, negativo=abono/deposito/pago recibido),
+  originalAmount (numero en moneda original), originalCurrency (MXN/EUR/USD/CHF/GBP/etc),
+  account (Credito o Debito), bank (nombre del banco detectado)
+Si una pagina no tiene transacciones (portada, resumen, etc) devuelve array vacio para esa pagina.
+RESPONDE SOLO con el array JSON. Sin texto adicional, sin markdown.`,
+    });
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({ model, max_tokens: 8096, messages: [{ role: 'user', content }] }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Error HTTP ${res.status}`);
+    }
+
+    const data  = await res.json();
+    const raw   = data.content[0].text.trim();
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (match) {
+      try { allTransactions = allTransactions.concat(JSON.parse(match[0])); }
+      catch (_) { /* batch mal formado, continuar */ }
+    }
+  }
+
+  if (!allTransactions.length) throw new Error('No se encontraron transacciones en el PDF.');
+  return allTransactions;
 }
 
 // ── Claude API ─────────────────────────────────────────────────
@@ -517,13 +585,19 @@ async function processFilesSequentially(files) {
 
     try {
       setProgress(10, 'Extrayendo texto del PDF...');
-      const text = await extractPDFText(file);
-      if (!text.trim()) throw new Error('El PDF no contiene texto seleccionable.');
+      const { text, pdf } = await extractPDFText(file);
+      const hasText = text.trim().length > 100;
 
-      setProgress(40, 'Enviando a Claude para clasificar transacciones...');
-      const transactions = await parseWithClaude(text, Settings.getModel(), apiKey);
+      let transactions;
+      if (hasText) {
+        setProgress(40, 'Enviando a Claude para clasificar transacciones...');
+        transactions = await parseWithClaude(text, Settings.getModel(), apiKey);
+      } else {
+        setProgress(20, `PDF escaneado detectado — leyendo ${pdf.numPages} paginas con vision IA...`);
+        transactions = await parseWithClaudeVision(pdf, Settings.getModel(), apiKey);
+      }
       if (!Array.isArray(transactions) || !transactions.length) {
-        throw new Error('No se encontraron transacciones.');
+        throw new Error('Claude no encontro transacciones en este PDF.');
       }
 
       setProgress(75, `Guardando ${transactions.length} transacciones...`);
