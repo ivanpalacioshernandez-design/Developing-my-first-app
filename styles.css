@@ -124,6 +124,7 @@ input, select, textarea { font: inherit; color: inherit; }
 /* ── Views ── */
 .view { padding: 28px 30px; max-width: 1180px; }
 .view.hidden { display: none; }
+.hidden { display: none !important; }
 
 /* ── Page header ── */
 .page-header {
