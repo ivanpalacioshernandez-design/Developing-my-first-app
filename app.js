@@ -106,11 +106,24 @@ async function renderPageToBase64(pdfPage) {
   return canvas.toDataURL('image/jpeg', 0.75).split(',')[1];
 }
 
+// Recover individual transaction objects from truncated JSON
+function extractPartialTransactions(raw) {
+  const transactions = [];
+  const matches = raw.match(/\{[^{}]+\}/g) || [];
+  for (const m of matches) {
+    try {
+      const obj = JSON.parse(m);
+      if (obj.id && obj.date && obj.amount !== undefined) transactions.push(obj);
+    } catch (e) {}
+  }
+  return transactions;
+}
+
 // ── Claude Vision API (PDFs escaneados sin texto) ──────────────
 async function parseWithClaudeVision(pdf, model, apiKey, onProgress = () => {}) {
   // Sonnet lee documentos escaneados mejor que Haiku
   const visionModel = model.includes('haiku') ? 'claude-sonnet-4-6' : model;
-  const BATCH       = 5;
+  const BATCH       = 10;
   const total       = pdf.numPages;
   const totalBatch  = Math.ceil(total / BATCH);
   let allTransactions = [];
@@ -197,7 +210,17 @@ RESPONDE UNICAMENTE con el array JSON. Sin explicaciones, sin markdown.`,
         try {
           const batch = JSON.parse(match[0]);
           if (Array.isArray(batch)) allTransactions = allTransactions.concat(batch);
-        } catch (e) { batchErrors.push(`Paginas ${start}-${end}: JSON invalido`); }
+        } catch (e) {
+          // JSON truncated mid-array — recover complete objects
+          const partial = extractPartialTransactions(raw);
+          console.warn(`JSON truncado batch ${start}-${end}, recuperadas ${partial.length} transacciones parciales`);
+          allTransactions = allTransactions.concat(partial);
+        }
+      } else if (data.stop_reason === 'max_tokens') {
+        // No closing bracket — response cut off; recover what we can
+        const partial = extractPartialTransactions(raw);
+        console.warn(`Respuesta truncada (max_tokens) batch ${start}-${end}, recuperadas ${partial.length} transacciones`);
+        allTransactions = allTransactions.concat(partial);
       }
 
       const donePct = 50 + ((batchIndex + 1) / totalBatch) * 45;
