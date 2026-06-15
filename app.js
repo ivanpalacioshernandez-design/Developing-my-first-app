@@ -107,21 +107,30 @@ async function renderPageToBase64(pdfPage) {
 }
 
 // ── Claude Vision API (PDFs escaneados sin texto) ──────────────
-async function parseWithClaudeVision(pdf, model, apiKey) {
-  const BATCH = 5;
-  const total = pdf.numPages;
+async function parseWithClaudeVision(pdf, model, apiKey, onProgress = () => {}) {
+  const BATCH       = 5;
+  const total       = pdf.numPages;
+  const totalBatch  = Math.ceil(total / BATCH);
   let allTransactions = [];
-  const batchErrors = [];
+  const batchErrors   = [];
+  let pagesRendered   = 0;
 
   for (let start = 1; start <= total; start += BATCH) {
-    const end     = Math.min(start + BATCH - 1, total);
-    const content = [];
+    const end        = Math.min(start + BATCH - 1, total);
+    const batchIndex = Math.floor((start - 1) / BATCH);
+    const content    = [];
 
     for (let p = start; p <= end; p++) {
+      const pct = (pagesRendered / total) * 50;
+      onProgress(pct, `Preparando pagina ${p} de ${total}...`);
       const page = await pdf.getPage(p);
       const b64  = await renderPageToBase64(page);
       content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } });
+      pagesRendered++;
     }
+
+    const claudePct = 50 + (batchIndex / totalBatch) * 45;
+    onProgress(claudePct, `Analizando paginas ${start}-${end} de ${total} con Claude...`);
 
     content.push({
       type: 'text',
@@ -175,7 +184,7 @@ RESPONDE UNICAMENTE con el array JSON. Sin explicaciones, sin markdown.`,
 
       const data  = await res.json();
       const raw   = data.content[0].text.trim();
-      console.log(`Vision batch ${start}-${end}:`, raw.substring(0, 200));
+      console.log(`Vision batch ${start}-${end}:`, raw.substring(0, 300));
 
       const match = raw.match(/\[[\s\S]*\]/);
       if (match) {
@@ -184,6 +193,10 @@ RESPONDE UNICAMENTE con el array JSON. Sin explicaciones, sin markdown.`,
           if (Array.isArray(batch)) allTransactions = allTransactions.concat(batch);
         } catch (e) { batchErrors.push(`Paginas ${start}-${end}: JSON invalido`); }
       }
+
+      const donePct = 50 + ((batchIndex + 1) / totalBatch) * 45;
+      onProgress(donePct, `${allTransactions.length} transacciones encontradas (pag. ${end} de ${total})...`);
+
     } catch (err) {
       batchErrors.push(`Paginas ${start}-${end}: ${err.message}`);
       console.error(`Vision batch error:`, err);
@@ -628,8 +641,9 @@ async function processFilesSequentially(files) {
         setProgress(40, 'Enviando a Claude para clasificar transacciones...');
         transactions = await parseWithClaude(text, Settings.getModel(), apiKey);
       } else {
-        setProgress(20, `PDF escaneado detectado — leyendo ${pdf.numPages} paginas con vision IA...`);
-        transactions = await parseWithClaudeVision(pdf, Settings.getModel(), apiKey);
+        const visionCb = (pct, hint) => setProgress(15 + pct * 0.75, hint);
+        visionCb(0, `PDF escaneado (${pdf.numPages} pags.) — preparando imagenes...`);
+        transactions = await parseWithClaudeVision(pdf, Settings.getModel(), apiKey, visionCb);
       }
       if (!Array.isArray(transactions) || !transactions.length) {
         throw new Error('Claude no encontro transacciones en este PDF.');
