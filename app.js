@@ -98,17 +98,19 @@ async function extractPDFText(file) {
 
 // ── Render PDF page to base64 JPEG (for scanned PDFs) ─────────
 async function renderPageToBase64(pdfPage) {
-  const viewport = pdfPage.getViewport({ scale: 2.0 });
+  const viewport = pdfPage.getViewport({ scale: 1.2 });
   const canvas   = document.createElement('canvas');
   canvas.width   = viewport.width;
   canvas.height  = viewport.height;
   await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-  return canvas.toDataURL('image/jpeg', 0.88).split(',')[1];
+  return canvas.toDataURL('image/jpeg', 0.75).split(',')[1];
 }
 
 // ── Claude Vision API (PDFs escaneados sin texto) ──────────────
 async function parseWithClaudeVision(pdf, model, apiKey, onProgress = () => {}) {
-  const BATCH       = 5;
+  // Sonnet lee documentos escaneados mejor que Haiku
+  const visionModel = model.includes('haiku') ? 'claude-sonnet-4-6' : model;
+  const BATCH       = 10;
   const total       = pdf.numPages;
   const totalBatch  = Math.ceil(total / BATCH);
   let allTransactions = [];
@@ -174,7 +176,7 @@ RESPONDE UNICAMENTE con el array JSON. Sin explicaciones, sin markdown.`,
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },
-        body: JSON.stringify({ model, max_tokens: 8096, messages: [{ role: 'user', content }] }),
+        body: JSON.stringify({ model: visionModel, max_tokens: 8096, messages: [{ role: 'user', content }] }),
       });
 
       if (!res.ok) {
