@@ -481,7 +481,7 @@ async function renderFiles() {
   });
 }
 
-async function processFile(file) {
+async function processFilesSequentially(files) {
   const apiKey = Settings.getApiKey();
   if (!apiKey) {
     toast('Configura tu API Key en Configuracion primero', 'error');
@@ -498,63 +498,82 @@ async function processFile(file) {
   uploadCard.classList.add('hidden');
   procCard.classList.remove('hidden');
 
-  const setProgress = (pct, hint) => { fill.style.width = pct + '%'; hintEl.textContent = hint; };
+  let totalImported = 0;
+  const errors = [];
 
-  try {
-    titleEl.textContent = `Procesando: ${file.name}`;
-    setProgress(10, 'Extrayendo texto del PDF...');
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const base = (i / files.length) * 100;
+    const slot = 100 / files.length;
 
-    const text = await extractPDFText(file);
-    if (!text.trim()) throw new Error('El PDF no contiene texto seleccionable. Prueba con un PDF diferente.');
+    const setProgress = (pct, hint) => {
+      fill.style.width = (base + pct * slot / 100) + '%';
+      hintEl.textContent = hint;
+    };
 
-    setProgress(40, 'Enviando a Claude para clasificar transacciones...');
+    titleEl.textContent = files.length > 1
+      ? `Archivo ${i + 1} de ${files.length}: ${file.name}`
+      : `Procesando: ${file.name}`;
 
-    const transactions = await parseWithClaude(text, Settings.getModel(), apiKey);
-    if (!Array.isArray(transactions) || !transactions.length) {
-      throw new Error('No se encontraron transacciones en el PDF.');
+    try {
+      setProgress(10, 'Extrayendo texto del PDF...');
+      const text = await extractPDFText(file);
+      if (!text.trim()) throw new Error('El PDF no contiene texto seleccionable.');
+
+      setProgress(40, 'Enviando a Claude para clasificar transacciones...');
+      const transactions = await parseWithClaude(text, Settings.getModel(), apiKey);
+      if (!Array.isArray(transactions) || !transactions.length) {
+        throw new Error('No se encontraron transacciones.');
+      }
+
+      setProgress(75, `Guardando ${transactions.length} transacciones...`);
+
+      const fileId = uid();
+      const now    = new Date().toISOString();
+
+      for (let j = 0; j < transactions.length; j++) {
+        const t = transactions[j];
+        await DB.put('transactions', {
+          id:               `${fileId}_${j}`,
+          date:             t.date || '',
+          description:      t.description || '',
+          category:         t.category || 'Otro',
+          amount:           +parseFloat(t.amount || 0).toFixed(2),
+          originalAmount:   +parseFloat(t.originalAmount || t.amount || 0).toFixed(2),
+          originalCurrency: t.originalCurrency || 'MXN',
+          account:          t.account || '',
+          bank:             t.bank || '',
+          fileId,
+          createdAt: now,
+        });
+      }
+
+      await DB.put('files', { id: fileId, name: file.name, txCount: transactions.length, uploadedAt: now });
+      totalImported += transactions.length;
+      setProgress(100, `Listo: ${transactions.length} transacciones`);
+
+    } catch (err) {
+      errors.push(`${file.name}: ${err.message}`);
+      console.error(err);
     }
+  }
 
-    setProgress(75, `Guardando ${transactions.length} transacciones...`);
+  fill.style.width = '100%';
 
-    const fileId = uid();
-    const now    = new Date().toISOString();
+  if (errors.length === 0) {
+    toast(`${totalImported} transacciones importadas de ${files.length} archivo${files.length > 1 ? 's' : ''}`, 'success');
+  } else if (totalImported > 0) {
+    toast(`${totalImported} transacciones importadas. ${errors.length} archivo${errors.length > 1 ? 's' : ''} con error.`, '');
+  } else {
+    toast('Error: ' + errors[0], 'error');
+  }
 
-    for (let i = 0; i < transactions.length; i++) {
-      const t = transactions[i];
-      await DB.put('transactions', {
-        id:               `${fileId}_${i}`,
-        date:             t.date || '',
-        description:      t.description || '',
-        category:         t.category || 'Otro',
-        amount:           +parseFloat(t.amount || 0).toFixed(2),
-        originalAmount:   +parseFloat(t.originalAmount || t.amount || 0).toFixed(2),
-        originalCurrency: t.originalCurrency || 'MXN',
-        account:          t.account || '',
-        bank:             t.bank || '',
-        fileId,
-        createdAt: now,
-      });
-    }
-
-    await DB.put('files', { id: fileId, name: file.name, txCount: transactions.length, uploadedAt: now });
-
-    setProgress(100, `Listo — ${transactions.length} transacciones importadas`);
-    toast(`${transactions.length} transacciones importadas de ${file.name}`, 'success');
-
-    setTimeout(() => {
-      procCard.classList.add('hidden');
-      uploadCard.classList.remove('hidden');
-      fill.style.width = '0%';
-      renderFiles();
-    }, 1200);
-
-  } catch (err) {
+  setTimeout(() => {
     procCard.classList.add('hidden');
     uploadCard.classList.remove('hidden');
     fill.style.width = '0%';
-    toast('Error: ' + err.message, 'error');
-    console.error(err);
-  }
+    renderFiles();
+  }, 1500);
 }
 
 // ── Settings ───────────────────────────────────────────────────
@@ -629,13 +648,14 @@ async function init() {
   zone.addEventListener('drop', e => {
     e.preventDefault();
     zone.classList.remove('dragover');
-    const f = [...e.dataTransfer.files].find(f => f.type === 'application/pdf');
-    if (f) processFile(f);
+    const files = [...e.dataTransfer.files].filter(f => f.type === 'application/pdf');
+    if (files.length) processFilesSequentially(files);
     else toast('Solo se aceptan archivos PDF', 'error');
   });
 
   fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) processFile(fileInput.files[0]);
+    const files = [...fileInput.files].filter(f => f.type === 'application/pdf');
+    if (files.length) processFilesSequentially(files);
     fileInput.value = '';
   });
 
