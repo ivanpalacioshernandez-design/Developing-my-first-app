@@ -110,7 +110,7 @@ async function renderPageToBase64(pdfPage) {
 async function parseWithClaudeVision(pdf, model, apiKey, onProgress = () => {}) {
   // Sonnet lee documentos escaneados mejor que Haiku
   const visionModel = model.includes('haiku') ? 'claude-sonnet-4-6' : model;
-  const BATCH       = 10;
+  const BATCH       = 5;
   const total       = pdf.numPages;
   const totalBatch  = Math.ceil(total / BATCH);
   let allTransactions = [];
@@ -187,7 +187,10 @@ RESPONDE UNICAMENTE con el array JSON. Sin explicaciones, sin markdown.`,
       const data  = await res.json();
       const raw   = data.content[0].text.trim();
       window._lastVisionResponse = raw;
-      console.log(`Vision batch ${start}-${end} (${visionModel}):`, raw.substring(0, 500));
+      console.log(`Vision batch ${start}-${end} (${visionModel}) stop_reason=${data.stop_reason}:`, raw.substring(0, 500));
+      if (data.stop_reason === 'max_tokens') {
+        console.warn(`ADVERTENCIA: respuesta truncada en batch ${start}-${end}. Intentando extraer transacciones parciales.`);
+      }
 
       const match = raw.match(/\[[\s\S]*\]/);
       if (match) {
