@@ -186,7 +186,8 @@ RESPONDE UNICAMENTE con el array JSON. Sin explicaciones, sin markdown.`,
 
       const data  = await res.json();
       const raw   = data.content[0].text.trim();
-      console.log(`Vision batch ${start}-${end}:`, raw.substring(0, 300));
+      window._lastVisionResponse = raw;
+      console.log(`Vision batch ${start}-${end} (${visionModel}):`, raw.substring(0, 500));
 
       const match = raw.match(/\[[\s\S]*\]/);
       if (match) {
@@ -206,10 +207,11 @@ RESPONDE UNICAMENTE con el array JSON. Sin explicaciones, sin markdown.`,
   }
 
   if (!allTransactions.length) {
+    const lastResponse = window._lastVisionResponse || 'sin respuesta';
     const detail = batchErrors.length
       ? ` (${batchErrors.join('; ')})`
-      : ' — revisa la consola del navegador para ver la respuesta de Claude.';
-    throw new Error('No se encontraron transacciones en el PDF' + detail);
+      : ` Claude respondio: "${lastResponse.substring(0, 120)}"`;
+    throw new Error('No se encontraron transacciones' + detail);
   }
   return allTransactions;
 }
