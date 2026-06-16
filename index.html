@@ -43,6 +43,12 @@
       </svg>
       Transacciones
     </button>
+    <button class="nav-item" data-view="analysis">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+      </svg>
+      Analisis
+    </button>
     <button class="nav-item" data-view="settings">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
@@ -203,6 +209,45 @@
     </div>
   </section>
 
+  <!-- ── Analisis ── -->
+  <section class="view hidden" id="view-analysis">
+    <div class="page-header">
+      <div>
+        <h1>Analisis Financiero</h1>
+        <p class="subtitle" id="analysisSubtitle">Tendencias, comparativas y recomendaciones</p>
+      </div>
+    </div>
+
+    <div class="stats-grid" id="analysisStats"></div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header"><h2>Ingresos vs Gastos por Mes</h2></div>
+        <div class="chart-container"><canvas id="chartIncomeExpense"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Tendencia de Gasto por Categoria</h2></div>
+        <div class="chart-container"><canvas id="chartCategoryTrend"></canvas></div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header"><h2>Mes Actual vs Promedio Historico</h2></div>
+        <div id="comparisonList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Gastos Recurrentes Detectados</h2></div>
+        <div id="recurringList"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2>Recomendaciones Financieras</h2></div>
+      <div id="recommendationsList"></div>
+    </div>
+  </section>
+
   <!-- ── Settings ── -->
   <section class="view hidden" id="view-settings">
     <div class="page-header">
@@ -252,6 +297,18 @@
       </div>
 
       <div class="card">
+        <div class="card-header"><h2>Fondo de Emergencia</h2></div>
+        <div class="form-field">
+          <label class="label">Ahorro actual destinado a emergencias (MXN)</label>
+          <div class="input-group">
+            <input type="number" class="input" id="emergencyFundInput" placeholder="0" min="0" step="100">
+            <button class="btn btn--primary" id="saveEmergencyFundBtn">Guardar</button>
+          </div>
+          <p class="field-hint">Opcional. Se usa en Analisis para calcular cuantos meses de gastos cubre tu fondo de emergencia.</p>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-header">
           <h2>Google Drive</h2>
           <span class="badge badge--soon">Proximamente</span>
@@ -265,6 +322,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

@@ -24,6 +24,8 @@ const Settings = {
   setApiKey: v  => localStorage.setItem('hf_api_key', v),
   getModel:  () => localStorage.getItem('hf_model') || 'claude-haiku-4-5-20251001',
   setModel:  v  => localStorage.setItem('hf_model', v),
+  getEmergencyFund: () => parseFloat(localStorage.getItem('hf_emergency_fund') || '0'),
+  setEmergencyFund: v  => localStorage.setItem('hf_emergency_fund', v),
 };
 
 // ── IndexedDB ──────────────────────────────────────────────────
@@ -329,6 +331,122 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+// ── Analysis helpers ───────────────────────────────────────────
+function isIncome(t)  { return t.amount < 0 && t.category !== 'Pago de Tarjeta'; }
+function isExpense(t) { return t.amount > 0 && t.category !== 'Pago de Tarjeta'; }
+
+function monthlyTotals(tx) {
+  const months = {};
+  tx.forEach(t => {
+    const m = t.date?.substring(0, 7);
+    if (!m) return;
+    if (!months[m]) months[m] = { income: 0, expense: 0 };
+    if (isIncome(t))  months[m].income  += -t.amount;
+    if (isExpense(t)) months[m].expense += t.amount;
+  });
+  return months;
+}
+
+function categoryMonthlyTotals(tx) {
+  const data = {};
+  tx.filter(isExpense).forEach(t => {
+    const m = t.date?.substring(0, 7);
+    if (!m) return;
+    data[t.category] = data[t.category] || {};
+    data[t.category][m] = (data[t.category][m] || 0) + t.amount;
+  });
+  return data;
+}
+
+function normalizeDesc(desc) {
+  return (desc || '').toLowerCase().replace(/[0-9]+/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function detectRecurring(tx) {
+  const groups = {};
+  tx.filter(isExpense).forEach(t => {
+    const key = normalizeDesc(t.description);
+    const m   = t.date?.substring(0, 7);
+    if (!key || !m) return;
+    groups[key] = groups[key] || { months: new Set(), amounts: [], description: t.description, category: t.category };
+    groups[key].months.add(m);
+    groups[key].amounts.push(t.amount);
+  });
+  return Object.values(groups)
+    .filter(g => g.months.size >= 2)
+    .map(g => ({
+      description: g.description,
+      category:    g.category,
+      monthsCount: g.months.size,
+      avgAmount:   g.amounts.reduce((a, b) => a + b, 0) / g.amounts.length,
+    }))
+    .sort((a, b) => b.monthsCount - a.monthsCount || b.avgAmount - a.avgAmount);
+}
+
+// ── Recommendations engine (reglas de finanzas personales) ─────
+function generateRecommendations(m) {
+  const recs = [];
+
+  if (m.avgSavingsRate !== null) {
+    const pct = Math.round(m.avgSavingsRate * 100);
+    if (m.avgSavingsRate < 0.20) {
+      recs.push({
+        title: 'Aumenta tu tasa de ahorro',
+        text: `Tu tasa de ahorro promedio es ${pct}%. La regla 50/30/20, popularizada por la exsenadora Elizabeth Warren, recomienda destinar al menos 20% de tus ingresos a ahorro o pago de deudas. Reducir gastos variables como Entretenimiento o Restaurantes suele ser el ajuste mas rapido para acercarte a ese objetivo.`,
+      });
+    } else {
+      recs.push({
+        title: 'Tasa de ahorro saludable',
+        text: `Tu tasa de ahorro promedio es ${pct}%, por encima del 20% que sugiere la regla 50/30/20. Considera dirigir el excedente a inversion o retiro una vez cubierto tu fondo de emergencia.`,
+      });
+    }
+  }
+
+  if (m.emergencyFund > 0) {
+    if (m.runwayMonths < 3) {
+      recs.push({
+        title: 'Fortalece tu fondo de emergencia',
+        text: `Tu fondo actual cubre ${m.runwayMonths.toFixed(1)} meses de gasto promedio. La guia mas comun en finanzas personales (usada por planificadores certificados CFP) recomienda mantener entre 3 y 6 meses de gastos esenciales en una cuenta liquida antes de priorizar inversion.`,
+      });
+    } else {
+      recs.push({
+        title: 'Fondo de emergencia saludable',
+        text: `Tu fondo cubre ${m.runwayMonths.toFixed(1)} meses de gasto, dentro del rango de 3 a 6 meses recomendado. Los excedentes mas alla de ese colchon suelen rendir mas en instrumentos de inversion que en efectivo.`,
+      });
+    }
+  } else if (m.avgMonthlyExpense > 0) {
+    recs.push({
+      title: 'Define un fondo de emergencia',
+      text: `Tu gasto promedio mensual es ${fmtMXN(m.avgMonthlyExpense)}. Se recomienda un fondo de emergencia de 3 a 6 meses de gasto (${fmtMXN(m.avgMonthlyExpense * 3)} - ${fmtMXN(m.avgMonthlyExpense * 6)}). Registra tu ahorro actual en Configuracion para ver tu avance aqui.`,
+    });
+  }
+
+  const overspent = m.comparison.filter(c => c.avg > 0 && c.deltaPct > 25);
+  if (overspent.length) {
+    const top = overspent[0];
+    recs.push({
+      title: `Revisa tu gasto en ${top.category}`,
+      text: `Este mes gastaste ${fmtMXN(top.current)} en ${top.category}, ${Math.round(top.deltaPct)}% mas que tu promedio historico (${fmtMXN(top.avg)}). Detectar desviaciones frente a tu propio promedio es la base del seguimiento de presupuesto que recomienda la mayoria de metodologias de finanzas personales.`,
+    });
+  }
+
+  if (m.recurringMonthly > 0) {
+    recs.push({
+      title: 'Audita tus cargos recurrentes',
+      text: `Detectamos aproximadamente ${fmtMXN(m.recurringMonthly)} mensuales en cargos que se repiten mes a mes (suscripciones, servicios). Revisar periodicamente estos cargos es una recomendacion comun para reducir el "gasto hormiga" que erosiona el ahorro sin que se note dia a dia.`,
+    });
+  }
+
+  if (!recs.length) {
+    recs.push({
+      title: 'Sigue registrando tus movimientos',
+      text: 'Con mas meses de historial podremos calcular tu tasa de ahorro, fondo de emergencia recomendado y patrones de gasto con mayor precision.',
+    });
+  }
+
+  return recs;
+}
+
 // ── Toast ──────────────────────────────────────────────────────
 let _toastTimer;
 function toast(msg, type = '') {
@@ -349,6 +467,7 @@ function showView(name) {
   if (name === 'dashboard')    renderDashboard();
   if (name === 'upload')       renderFiles();
   if (name === 'transactions') renderTransactions();
+  if (name === 'analysis')     renderAnalysis();
   if (name === 'settings')     renderSettings();
 }
 
@@ -432,6 +551,187 @@ function renderMonthlyChart(tx) {
       },
     },
   });
+}
+
+function renderIncomeExpenseChart(monthsList, totals) {
+  destroyChart('incomeExpense');
+  const labels  = monthsList.map(monthLabel);
+  const income  = monthsList.map(m => +totals[m].income.toFixed(2));
+  const expense = monthsList.map(m => +totals[m].expense.toFixed(2));
+
+  const ctx = document.getElementById('chartIncomeExpense');
+  if (!ctx) return;
+
+  _charts.incomeExpense = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Ingresos', data: income,  backgroundColor: '#10b981', borderRadius: 5 },
+        { label: 'Gastos',   data: expense, backgroundColor: '#ef4444', borderRadius: 5 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: v => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v) } },
+      },
+    },
+  });
+}
+
+function renderCategoryTrendChart(monthsList, catMonthly) {
+  destroyChart('catTrend');
+  const totals  = Object.entries(catMonthly).map(([cat, byMonth]) => [cat, Object.values(byMonth).reduce((a, b) => a + b, 0)]);
+  const topCats = totals.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([cat]) => cat);
+
+  const labels   = monthsList.map(monthLabel);
+  const datasets = topCats.map(cat => ({
+    label: cat,
+    data: monthsList.map(m => +((catMonthly[cat]?.[m]) || 0).toFixed(2)),
+    borderColor: CAT_COLORS[cat] || '#94a3b8',
+    backgroundColor: 'transparent',
+    tension: .3,
+    borderWidth: 2,
+    pointRadius: 2,
+  }));
+
+  const ctx = document.getElementById('chartCategoryTrend');
+  if (!ctx) return;
+
+  _charts.catTrend = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: v => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v) } },
+      },
+    },
+  });
+}
+
+// ── Analisis ───────────────────────────────────────────────────
+async function renderAnalysis() {
+  const allTx = await DB.getAll('transactions');
+
+  if (!allTx.length) {
+    document.getElementById('analysisStats').innerHTML = '';
+    document.getElementById('comparisonList').innerHTML     = '<p class="empty">Sube estados de cuenta para ver tu analisis aqui.</p>';
+    document.getElementById('recurringList').innerHTML      = '';
+    document.getElementById('recommendationsList').innerHTML = '';
+    destroyChart('incomeExpense');
+    destroyChart('catTrend');
+    return;
+  }
+
+  const totals       = monthlyTotals(allTx);
+  const sortedMonths = Object.keys(totals).sort();
+
+  const ratesValid = sortedMonths
+    .map(m => totals[m])
+    .filter(d => d.income > 0)
+    .map(d => (d.income - d.expense) / d.income);
+  const avgSavingsRate = ratesValid.length ? ratesValid.reduce((a, b) => a + b, 0) / ratesValid.length : null;
+
+  const recentMonths     = sortedMonths.slice(-6);
+  const avgMonthlyExpense = recentMonths.length
+    ? recentMonths.reduce((s, m) => s + totals[m].expense, 0) / recentMonths.length
+    : 0;
+
+  const emergencyFund = Settings.getEmergencyFund();
+  const runwayMonths   = avgMonthlyExpense > 0 ? emergencyFund / avgMonthlyExpense : 0;
+
+  const recurring        = detectRecurring(allTx);
+  const recurringMonthly = recurring.reduce((s, r) => s + r.avgAmount, 0);
+
+  const catMonthly  = categoryMonthlyTotals(allTx);
+  const lastMonth   = sortedMonths[sortedMonths.length - 1];
+  const priorMonths = sortedMonths.slice(0, -1);
+  const comparison = Object.entries(catMonthly).map(([cat, byMonth]) => {
+    const current   = byMonth[lastMonth] || 0;
+    const priorVals = priorMonths.map(m => byMonth[m] || 0).filter(v => v > 0);
+    const avg       = priorVals.length ? priorVals.reduce((a, b) => a + b, 0) / priorVals.length : 0;
+    const deltaPct  = avg > 0 ? ((current - avg) / avg * 100) : (current > 0 ? 100 : 0);
+    return { category: cat, current, avg, deltaPct };
+  }).filter(c => c.current > 0 || c.avg > 0)
+    .sort((a, b) => b.current - a.current);
+
+  document.getElementById('analysisSubtitle').textContent = `${sortedMonths.length} meses de historial`;
+  document.getElementById('analysisStats').innerHTML = `
+    <div class="stat-card">
+      <p class="stat-label">Tasa de Ahorro Promedio</p>
+      <p class="stat-value">${avgSavingsRate !== null ? Math.round(avgSavingsRate * 100) + '%' : '—'}</p>
+      <p class="stat-sub">Meta sugerida: 20%</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Fondo de Emergencia</p>
+      <p class="stat-value">${emergencyFund > 0 ? runwayMonths.toFixed(1) + ' meses' : 'Sin registrar'}</p>
+      <p class="stat-sub">Recomendado: 3-6 meses</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Gasto Recurrente Mensual</p>
+      <p class="stat-value">${fmtMXN(recurringMonthly)}</p>
+      <p class="stat-sub">${recurring.length} cargo${recurring.length !== 1 ? 's' : ''} detectado${recurring.length !== 1 ? 's' : ''}</p>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">Gasto Promedio Mensual</p>
+      <p class="stat-value">${fmtMXN(avgMonthlyExpense)}</p>
+      <p class="stat-sub">Ultimos ${recentMonths.length} meses</p>
+    </div>
+  `;
+
+  renderIncomeExpenseChart(sortedMonths, totals);
+  renderCategoryTrendChart(sortedMonths, catMonthly);
+
+  const compEl  = document.getElementById('comparisonList');
+  const compTop = comparison.slice(0, 8);
+  if (!compTop.length) {
+    compEl.innerHTML = '<p class="empty">Necesitas al menos dos meses de historial para comparar.</p>';
+  } else {
+    compEl.innerHTML = compTop.map(c => {
+      const color    = CAT_COLORS[c.category] || '#94a3b8';
+      const dirClass = c.deltaPct > 5 ? 'up' : c.deltaPct < -5 ? 'down' : 'flat';
+      const sign     = c.deltaPct > 0 ? '+' : '';
+      return `
+        <div class="comparison-row">
+          <div class="comparison-left">
+            <span class="cat-badge" style="background:${color}1a;color:${color}">${esc(c.category)}</span>
+          </div>
+          <div class="comparison-amounts">${fmtMXN(c.current)} vs prom. ${fmtMXN(c.avg)}</div>
+          <span class="comparison-delta ${dirClass}">${sign}${Math.round(c.deltaPct)}%</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const recEl  = document.getElementById('recurringList');
+  const recTop = recurring.slice(0, 8);
+  if (!recTop.length) {
+    recEl.innerHTML = '<p class="empty">No detectamos cargos recurrentes con al menos dos meses de historial.</p>';
+  } else {
+    recEl.innerHTML = recTop.map(r => `
+      <div class="recurring-row">
+        <div>
+          <p class="recurring-desc">${esc(r.description)}</p>
+          <p class="recurring-meta">${esc(r.category)} &bull; ${r.monthsCount} meses</p>
+        </div>
+        <span class="recurring-amount">${fmtMXN(r.avgAmount)} /mes</span>
+      </div>
+    `).join('');
+  }
+
+  const recs = generateRecommendations({ avgSavingsRate, emergencyFund, runwayMonths, avgMonthlyExpense, comparison, recurringMonthly });
+  document.getElementById('recommendationsList').innerHTML = recs.map(r => `
+    <div class="rec-item">
+      <p class="rec-title">${esc(r.title)}</p>
+      <p class="rec-text">${esc(r.text)}</p>
+    </div>
+  `).join('');
 }
 
 // ── Dashboard ──────────────────────────────────────────────────
@@ -734,6 +1034,8 @@ async function renderSettings() {
   const key = Settings.getApiKey();
   document.getElementById('apiKeyInput').value  = key ? '••••••••••••••••••••' : '';
   document.getElementById('modelSelect').value  = Settings.getModel();
+  const fund = Settings.getEmergencyFund();
+  document.getElementById('emergencyFundInput').value = fund || '';
   const allTx    = await DB.getAll('transactions');
   const allFiles = await DB.getAll('files');
   document.getElementById('storedTxCount').textContent   = allTx.length;
@@ -856,6 +1158,12 @@ async function init() {
   document.getElementById('modelSelect').addEventListener('change', e => {
     Settings.setModel(e.target.value);
     toast('Modelo actualizado', 'success');
+  });
+
+  document.getElementById('saveEmergencyFundBtn').addEventListener('click', () => {
+    const val = parseFloat(document.getElementById('emergencyFundInput').value) || 0;
+    Settings.setEmergencyFund(val);
+    toast('Fondo de emergencia actualizado', 'success');
   });
 
   // Settings — export all
