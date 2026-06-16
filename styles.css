@@ -325,6 +325,16 @@ input, select, textarea { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 
+.cat-edit {
+  border: none;
+  border-radius: 20px;
+  padding: 3px 8px;
+  font-size: .72rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+}
+
 /* ── Filters ── */
 .filters {
   display: flex;

@@ -7,6 +7,7 @@ const CAT_COLORS = {
   'Supermercado':    '#10b981',
   'Alimentacion':    '#22c55e',
   'Alimentación':    '#22c55e',
+  'Hipoteca':        '#b45309',
   'Entretenimiento': '#8b5cf6',
   'Transporte':      '#06b6d4',
   'Gasolina':        '#f97316',
@@ -15,6 +16,8 @@ const CAT_COLORS = {
   'Pago de Tarjeta': '#64748b',
   'Otro':            '#94a3b8',
 };
+
+const CATEGORIES = Object.keys(CAT_COLORS).filter(c => c !== 'Alimentación');
 
 const PAGE_SIZE = 25;
 
@@ -162,7 +165,7 @@ Incluye TODOS los cargos y abonos que aparezcan, incluyendo:
 - Transferencias SPEI
 - Disposiciones de efectivo
 - Pagos de tarjeta de credito
-- Cobros automaticos
+- Cobros automaticos (incluyendo pagos hipotecarios o de credito de vivienda — INFONAVIT, FOVISSSTE, bancos)
 - Depositos y abonos
 
 Para cada movimiento devuelve:
@@ -170,7 +173,7 @@ Para cada movimiento devuelve:
   "id": "tx_001",
   "date": "YYYY-MM-DD",
   "description": "descripcion o comercio tal como aparece",
-  "category": "una de exactamente: Viajes, Restaurantes, Supermercado, Alimentacion, Entretenimiento, Transporte, Gasolina, Ropa, Servicios, Pago de Tarjeta, Otro",
+  "category": "una de exactamente: Viajes, Restaurantes, Supermercado, Alimentacion, Hipoteca, Entretenimiento, Transporte, Gasolina, Ropa, Servicios, Pago de Tarjeta, Otro",
   "amount": numero (positivo si es cargo/gasto, negativo si es abono/deposito),
   "originalAmount": mismo numero que amount si es MXN,
   "originalCurrency": "MXN",
@@ -254,7 +257,7 @@ Para cada transaccion usa exactamente estos campos:
 - id: string unico (ej: "tx_001")
 - date: fecha en formato YYYY-MM-DD
 - description: nombre del comercio limpio y legible
-- category: EXACTAMENTE una de estas: Viajes, Restaurantes, Supermercado, Alimentacion, Entretenimiento, Transporte, Gasolina, Ropa, Servicios, Pago de Tarjeta, Otro
+- category: EXACTAMENTE una de estas: Viajes, Restaurantes, Supermercado, Alimentacion, Hipoteca, Entretenimiento, Transporte, Gasolina, Ropa, Servicios, Pago de Tarjeta, Otro
 - amount: monto en MXN (numero, positivo=gasto, negativo=pago o abono)
 - originalAmount: monto en la moneda original (numero)
 - originalCurrency: MXN, EUR, USD, CHF, GBP, etc.
@@ -266,6 +269,7 @@ Clasificacion:
 - Restaurantes, cafes, bares, comida rapida = Restaurantes
 - Walmart, Soriana, Chedraui, Costco, HEB, supermercados = Supermercado
 - Panaderias, tiendas de abarrotes, comida local = Alimentacion
+- Pagos hipotecarios o de credito de vivienda, INFONAVIT, FOVISSSTE, cobros automaticos recurrentes ligados a una hipoteca = Hipoteca
 - Cines, museos, deportes, eventos, parques = Entretenimiento
 - Uber, taxi, bus, metro, peaje, SANEF, CTS = Transporte
 - Gasolineras, PEMEX, BP, Shell = Gasolina
@@ -857,7 +861,11 @@ function applyTxFilters(allTx) {
         <tr>
           <td style="white-space:nowrap">${fmtDate(t.date)}</td>
           <td>${esc(t.description || '')}</td>
-          <td><span class="cat-badge" style="background:${color}1a;color:${color}">${esc(t.category || '')}</span></td>
+          <td>
+            <select class="cat-edit" data-id="${esc(t.id)}" style="background-color:${color}1a;color:${color}">
+              ${CATEGORIES.map(c => `<option value="${esc(c)}"${c === t.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+            </select>
+          </td>
           <td>${esc(t.originalCurrency || '')}</td>
           <td class="right">${origFmt}</td>
           <td class="right ${t.amount < 0 ? 'amount-neg' : 'amount-pos'}">${fmtMXN(t.amount)}</td>
@@ -866,6 +874,20 @@ function applyTxFilters(allTx) {
         </tr>
       `;
     }).join('');
+
+    body.querySelectorAll('.cat-edit').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const id = sel.dataset.id;
+        const tx = (await DB.getAll('transactions')).find(t => t.id === id);
+        if (!tx) return;
+        tx.category = sel.value;
+        await DB.put('transactions', tx);
+        const color = CAT_COLORS[tx.category] || '#94a3b8';
+        sel.style.backgroundColor = `${color}1a`;
+        sel.style.color = color;
+        toast('Categoria actualizada', 'success');
+      });
+    });
   }
 
   // Pagination
